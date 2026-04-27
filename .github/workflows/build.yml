@@ -1,4 +1,4 @@
-name: 构建
+name: 构建和推送
 
 on:
   push:
@@ -8,15 +8,18 @@ on:
 env:
   APP_NAME: taoSync
   DOCKER_USER: miuior
-  DOCKER_NAME: tao-sync
+  DOCKER_NAME: taosync-cas
+  GITHUB_USER: JzeroM  # 你的 GitHub 用户名
 
 jobs:
   get-version:
     name: 获取版本号
     runs-on: ubuntu-latest
     outputs:
-      TAG_LIST: ${{ steps.getVersion.outputs.TAG_LIST }}
+      DOCKER_TAG_LIST: ${{ steps.getVersion.outputs.DOCKER_TAG_LIST }}
+      GHCR_TAG_LIST: ${{ steps.getVersion.outputs.GHCR_TAG_LIST }}
       VERSION: ${{ steps.getVersion.outputs.VERSION }}
+      TAG_LIST: ${{ steps.getVersion.outputs.TAG_LIST }}
 
     steps:
       - name: 检出仓库代码
@@ -26,13 +29,26 @@ jobs:
         name: 获取版本号
         run: |
           versions=$(head -n 1 version.txt)
-          tagList=""
+          dockerTagList=""
+          ghcrTagList=""
+          allTagList=""
           IFS=',' read -ra versionList <<< "$versions"
           cuVersion="${versionList[0]}"
+          
           for version in "${versionList[@]}"; do
-            tagList+="-t $DOCKER_USER/$DOCKER_NAME:$version "
+            dockerTagList+="-t $DOCKER_USER/$DOCKER_NAME:$version "
+            ghcrTagList+="-t ghcr.io/$GITHUB_USER/$DOCKER_NAME:$version "
+            allTagList+="-t $DOCKER_USER/$DOCKER_NAME:$version -t ghcr.io/$GITHUB_USER/$DOCKER_NAME:$version "
           done
-          echo "TAG_LIST=$tagList" >> "$GITHUB_OUTPUT"
+          
+          # 添加 latest 标签
+          dockerTagList+="-t $DOCKER_USER/$DOCKER_NAME:latest "
+          ghcrTagList+="-t ghcr.io/$GITHUB_USER/$DOCKER_NAME:latest "
+          allTagList+="-t $DOCKER_USER/$DOCKER_NAME:latest -t ghcr.io/$GITHUB_USER/$DOCKER_NAME:latest "
+          
+          echo "DOCKER_TAG_LIST=$dockerTagList" >> "$GITHUB_OUTPUT"
+          echo "GHCR_TAG_LIST=$ghcrTagList" >> "$GITHUB_OUTPUT"
+          echo "TAG_LIST=$allTagList" >> "$GITHUB_OUTPUT"
           echo "VERSION=$cuVersion" >> "$GITHUB_OUTPUT"
 
   build-frontend:
@@ -66,7 +82,7 @@ jobs:
           retention-days: 1
 
   build-docker:
-    name: 构建Docker与linux
+    name: 构建Docker镜像
     runs-on: ubuntu-latest
     needs: [ get-version, build-frontend ]
     env:
@@ -100,6 +116,13 @@ jobs:
           username: ${{ env.DOCKER_USER }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
+      - name: 登录到GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ env.GITHUB_USER }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
       - name: 检出仓库代码
         uses: actions/checkout@v4
 
@@ -118,6 +141,12 @@ jobs:
           outputs: |
             type=docker
             type=image,name=${{ env.DOCKER_USER }}/${{ env.DOCKER_NAME }},push-by-digest=true,name-canonical=true,push=true
+            type=image,name=ghcr.io/${{ env.GITHUB_USER }}/${{ env.DOCKER_NAME }},push-by-digest=true,name-canonical=true,push=true
+          tags: |
+            ${{ env.DOCKER_USER }}/${{ env.DOCKER_NAME }}:latest
+            ${{ env.DOCKER_USER }}/${{ env.DOCKER_NAME }}:${{ env.VERSION }}
+            ghcr.io/${{ env.GITHUB_USER }}/${{ env.DOCKER_NAME }}:latest
+            ghcr.io/${{ env.GITHUB_USER }}/${{ env.DOCKER_NAME }}:${{ env.VERSION }}
 
       - name: 导出digest
         run: |
@@ -146,11 +175,12 @@ jobs:
           retention-days: 1
 
   merge-docker:
-    name: 合并Docker镜像
+    name: 合并Docker镜像清单
     runs-on: ubuntu-latest
     needs: [get-version, build-docker]
     env:
-      TAG_LIST: ${{ needs.get-version.outputs.TAG_LIST }}
+      DOCKER_TAG_LIST: ${{ needs.get-version.outputs.DOCKER_TAG_LIST }}
+      GHCR_TAG_LIST: ${{ needs.get-version.outputs.GHCR_TAG_LIST }}
     steps:
       - name: 下载digest
         uses: actions/download-artifact@v4
@@ -168,11 +198,54 @@ jobs:
           username: ${{ env.DOCKER_USER }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: 创建清单并推送
+      - name: 登录到GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ env.GITHUB_USER }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 为Docker Hub创建并推送清单
         working-directory: /tmp/digests
         run: |
-          docker buildx imagetools create ${{ env.TAG_LIST }}$(printf '${{ env.DOCKER_USER }}/${{ env.DOCKER_NAME }}@sha256:%s ' *)
+          # 为每个版本创建清单
+          versions=$(head -n 1 ../../version.txt)
+          IFS=',' read -ra versionList <<< "$versions"
+          
+          for version in "${versionList[@]}"; do
+            echo "创建清单 $DOCKER_USER/$DOCKER_NAME:$version"
+            docker buildx imagetools create \
+              -t $DOCKER_USER/$DOCKER_NAME:$version \
+              $(printf '${{ env.DOCKER_USER }}/${{ env.DOCKER_NAME }}@sha256:%s ' *)
+          done
+          
+          # 创建 latest 清单
+          echo "创建清单 $DOCKER_USER/$DOCKER_NAME:latest"
+          docker buildx imagetools create \
+            -t $DOCKER_USER/$DOCKER_NAME:latest \
+            $(printf '${{ env.DOCKER_USER }}/${{ env.DOCKER_NAME }}@sha256:%s ' *)
 
+      - name: 为GitHub Container Registry创建并推送清单
+        working-directory: /tmp/digests
+        run: |
+          # 为每个版本创建清单
+          versions=$(head -n 1 ../../version.txt)
+          IFS=',' read -ra versionList <<< "$versions"
+          
+          for version in "${versionList[@]}"; do
+            echo "创建清单 ghcr.io/$GITHUB_USER/$DOCKER_NAME:$version"
+            docker buildx imagetools create \
+              -t ghcr.io/$GITHUB_USER/$DOCKER_NAME:$version \
+              $(printf 'ghcr.io/${{ env.GITHUB_USER }}/${{ env.DOCKER_NAME }}@sha256:%s ' *)
+          done
+          
+          # 创建 latest 清单
+          echo "创建清单 ghcr.io/$GITHUB_USER/$DOCKER_NAME:latest"
+          docker buildx imagetools create \
+            -t ghcr.io/$GITHUB_USER/$DOCKER_NAME:latest \
+            $(printf 'ghcr.io/${{ env.GITHUB_USER }}/${{ env.DOCKER_NAME }}@sha256:%s ' *)
+
+  # 其他平台构建作业保持不变...
   build-windows:
     name: 构建windows
     strategy:
@@ -280,7 +353,7 @@ jobs:
   create-release:
     name: 发布release
     runs-on: ubuntu-latest
-    needs: [get-version, build-windows, build-darwin, build-docker]
+    needs: [get-version, build-windows, build-darwin, build-docker, merge-docker]
     env:
       VERSION: ${{needs.get-version.outputs.VERSION}}
     if: ${{ !contains(needs.get-version.outputs.VERSION, 'dev') }}
@@ -312,3 +385,19 @@ jobs:
           files: dist/*
           body_path: ${{ env.LOG_FILE }}
           prerelease: ${{ contains(env.VERSION, 'dev') || contains(env.VERSION, 'pre') || contains(env.VERSION, 'beta') }}
+
+      - name: 输出镜像信息
+        run: |
+          echo "Docker镜像已推送到:"
+          echo "1. Docker Hub: $DOCKER_USER/$DOCKER_NAME"
+          echo "2. GitHub Container Registry: ghcr.io/$GITHUB_USER/$DOCKER_NAME"
+          echo ""
+          echo "可用标签:"
+          versions=$(head -n 1 version.txt)
+          IFS=',' read -ra versionList <<< "$versions"
+          for version in "${versionList[@]}"; do
+            echo "- $DOCKER_USER/$DOCKER_NAME:$version"
+            echo "- ghcr.io/$GITHUB_USER/$DOCKER_NAME:$version"
+          done
+          echo "- $DOCKER_USER/$DOCKER_NAME:latest"
+          echo "- ghcr.io/$GITHUB_USER/$DOCKER_NAME:latest"
