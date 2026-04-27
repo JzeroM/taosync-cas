@@ -1,4 +1,4 @@
-name: 构建和推送Docker镜像（全架构）
+name: 构建
 
 on:
   push:
@@ -15,8 +15,8 @@ jobs:
     name: 获取版本号
     runs-on: ubuntu-latest
     outputs:
-      VERSION: ${{ steps.getVersion.outputs.VERSION }}
       TAG_LIST: ${{ steps.getVersion.outputs.TAG_LIST }}
+      VERSION: ${{ steps.getVersion.outputs.VERSION }}
 
     steps:
       - name: 检出仓库代码
@@ -25,18 +25,15 @@ jobs:
       - id: getVersion
         name: 获取版本号
         run: |
-          VERSION=$(head -n 1 version.txt | cut -d',' -f1)
-          # 获取所有版本标签
           versions=$(head -n 1 version.txt)
           tagList=""
           IFS=',' read -ra versionList <<< "$versions"
+          cuVersion="${versionList[0]}"
           for version in "${versionList[@]}"; do
-            tagList+="$version "
+            tagList+="-t $DOCKER_USER/$DOCKER_NAME:$version "
           done
-          
-          echo "VERSION=$VERSION" >> "$GITHUB_OUTPUT"
           echo "TAG_LIST=$tagList" >> "$GITHUB_OUTPUT"
-          echo "检测到版本: $tagList"
+          echo "VERSION=$cuVersion" >> "$GITHUB_OUTPUT"
 
   build-frontend:
     name: 构建前端
@@ -49,25 +46,17 @@ jobs:
       - name: 检出仓库代码
         uses: actions/checkout@v4
 
-      - name: 安装Node.js
+      - name: 安装Node.js 14.x
         uses: actions/setup-node@v4
         with:
           node-version: "14.x"
 
-      - name: 构建前端
+      - name: 安装依赖并构建前端
         run: |
-          if [ -f "frontend/src/views/page/setting/index.vue" ]; then
-            sed -i "s/__version_placeholder__/$VERSION/g" frontend/src/views/page/setting/index.vue
-          fi
-          
-          if [ -d "frontend" ]; then
-            cd frontend
-            npm install
-            npm run build
-          else
-            echo "前端目录不存在，跳过前端构建"
-            mkdir -p frontend/dist
-          fi
+          sed -i "s/__version_placeholder__/$VERSION/g" frontend/src/views/page/setting/index.vue
+          cd frontend
+          npm install
+          npm run build
 
       - name: 上传artifact
         uses: actions/upload-artifact@v4
@@ -76,8 +65,8 @@ jobs:
           path: frontend/dist
           retention-days: 1
 
-  build-docker-all-arch:
-    name: 构建Docker镜像（全架构）
+  build-docker:
+    name: 构建Docker与linux
     runs-on: ubuntu-latest
     needs: [ get-version, build-frontend ]
     env:
@@ -102,7 +91,7 @@ jobs:
       - name: 设置QEMU
         uses: docker/setup-qemu-action@v3
 
-      - name: 设置Docker Buildx
+      - name: 设置Docker BuildX
         uses: docker/setup-buildx-action@v3
 
       - name: 登录到DockerHub
@@ -110,20 +99,6 @@ jobs:
         with:
           username: ${{ env.DOCKER_USER }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
-
-      - name: 获取GitHub用户名（小写）
-        id: get-gh-username
-        run: |
-          REPO_OWNER="${{ github.repository_owner }}"
-          LOWERCASE_OWNER=$(echo "$REPO_OWNER" | tr '[:upper:]' '[:lower:]')
-          echo "GH_USERNAME=$LOWERCASE_OWNER" >> $GITHUB_OUTPUT
-
-      - name: 登录到GitHub Container Registry
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.repository_owner }}
-          password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: 检出仓库代码
         uses: actions/checkout@v4
@@ -134,47 +109,6 @@ jobs:
           name: frontend-dist
           path: frontend/dist
 
-      - name: 构建前修复导入问题
-        run: |
-          python3 -c "
-import os
-os.makedirs('service/syncJob', exist_ok=True)
-
-# 创建jobClient.py
-job_client_code = '''class JobClient:
-    def __init__(self):
-        self.connected = False
-    
-    def connect(self, *args, **kwargs):
-        self.connected = True
-        return True
-    
-    def disconnect(self, *args, **kwargs):
-        self.connected = False
-        return True
-    
-    def execute(self, job_data, *args, **kwargs):
-        return {'status': 'success', 'data': job_data}
-    
-    def get_status(self, *args, **kwargs):
-        return {'status': 'idle', 'connected': self.connected}
-    
-    def is_connected(self, *args, **kwargs):
-        return self.connected
-
-jobClient = JobClient()
-'''
-
-with open('service/syncJob/jobClient.py', 'w') as f:
-    f.write(job_client_code)
-print('创建了 service/syncJob/jobClient.py')
-
-# 创建__init__.py
-with open('service/syncJob/__init__.py', 'w') as f:
-    f.write('from .jobClient import jobClient\\nfrom .jobService import jobService')
-print('创建了 service/syncJob/__init__.py')
-"
-
       - id: build-image
         name: 构建docker镜像
         uses: docker/build-push-action@v6
@@ -184,7 +118,6 @@ print('创建了 service/syncJob/__init__.py')
           outputs: |
             type=docker
             type=image,name=${{ env.DOCKER_USER }}/${{ env.DOCKER_NAME }},push-by-digest=true,name-canonical=true,push=true
-            type=image,name=ghcr.io/${{ steps.get-gh-username.outputs.GH_USERNAME }}/${{ env.DOCKER_NAME }},push-by-digest=true,name-canonical=true,push=true
 
       - name: 导出digest
         run: |
@@ -212,13 +145,12 @@ print('创建了 service/syncJob/__init__.py')
           path: ${{ env.APP_NAME }}-${{ env.VERSION }}-${{ env.PLATFORM_PAIR }}.tar.gz
           retention-days: 1
 
-  merge-manifests:
-    name: 合并镜像清单
+  merge-docker:
+    name: 合并Docker镜像
     runs-on: ubuntu-latest
-    needs: [get-version, build-docker-all-arch]
+    needs: [get-version, build-docker]
     env:
-      VERSION: ${{ needs.get-version.outputs.VERSION }}
-    
+      TAG_LIST: ${{ needs.get-version.outputs.TAG_LIST }}
     steps:
       - name: 下载digest
         uses: actions/download-artifact@v4
@@ -227,7 +159,7 @@ print('创建了 service/syncJob/__init__.py')
           pattern: digests-*
           merge-multiple: true
 
-      - name: 设置Docker Buildx
+      - name: 设置Docker BuildX
         uses: docker/setup-buildx-action@v3
 
       - name: 登录到DockerHub
@@ -236,69 +168,13 @@ print('创建了 service/syncJob/__init__.py')
           username: ${{ env.DOCKER_USER }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: 获取GitHub用户名（小写）
-        id: get-gh-username
-        run: |
-          REPO_OWNER="${{ github.repository_owner }}"
-          LOWERCASE_OWNER=$(echo "$REPO_OWNER" | tr '[:upper:]' '[:lower:]')
-          echo "GH_USERNAME=$LOWERCASE_OWNER" >> $GITHUB_OUTPUT
-
-      - name: 登录到GitHub Container Registry
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.repository_owner }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: 获取所有版本标签
-        id: get-all-tags
-        run: |
-          versions="${{ needs.get-version.outputs.TAG_LIST }}"
-          DOCKER_TAGS=""
-          GHCR_TAGS=""
-          
-          for tag in $versions; do
-            DOCKER_TAGS+="-t $DOCKER_USER/$DOCKER_NAME:$tag "
-            GHCR_TAGS+="-t ghcr.io/${{ steps.get-gh-username.outputs.GH_USERNAME }}/$DOCKER_NAME:$tag "
-          done
-          
-          # 添加latest标签
-          DOCKER_TAGS+="-t $DOCKER_USER/$DOCKER_NAME:latest "
-          GHCR_TAGS+="-t ghcr.io/${{ steps.get-gh-username.outputs.GH_USERNAME }}/$DOCKER_NAME:latest "
-          
-          echo "DOCKER_TAGS=$DOCKER_TAGS" >> $GITHUB_OUTPUT
-          echo "GHCR_TAGS=$GHCR_TAGS" >> $GITHUB_OUTPUT
-          echo "Docker Tags: $DOCKER_TAGS"
-          echo "GHCR Tags: $GHCR_TAGS"
-
-      - name: 为Docker Hub创建清单
+      - name: 创建清单并推送
         working-directory: /tmp/digests
         run: |
-          # 为每个版本创建多架构清单
-          versions="${{ needs.get-version.outputs.TAG_LIST }}"
-          
-          for tag in $versions latest; do
-            echo "创建Docker Hub清单: $DOCKER_USER/$DOCKER_NAME:$tag"
-            docker buildx imagetools create \
-              -t $DOCKER_USER/$DOCKER_NAME:$tag \
-              $(printf '${{ env.DOCKER_USER }}/${{ env.DOCKER_NAME }}@sha256:%s ' *)
-          done
-
-      - name: 为GitHub Container Registry创建清单
-        working-directory: /tmp/digests
-        run: |
-          # 为每个版本创建多架构清单
-          versions="${{ needs.get-version.outputs.TAG_LIST }}"
-          
-          for tag in $versions latest; do
-            echo "创建GHCR清单: ghcr.io/${{ steps.get-gh-username.outputs.GH_USERNAME }}/$DOCKER_NAME:$tag"
-            docker buildx imagetools create \
-              -t ghcr.io/${{ steps.get-gh-username.outputs.GH_USERNAME }}/$DOCKER_NAME:$tag \
-              $(printf 'ghcr.io/${{ steps.get-gh-username.outputs.GH_USERNAME }}/${{ env.DOCKER_NAME }}@sha256:%s ' *)
-          done
+          docker buildx imagetools create ${{ env.TAG_LIST }}$(printf '${{ env.DOCKER_USER }}/${{ env.DOCKER_NAME }}@sha256:%s ' *)
 
   build-windows:
-    name: 构建Windows
+    name: 构建windows
     strategy:
       matrix:
         os:
@@ -320,45 +196,6 @@ print('创建了 service/syncJob/__init__.py')
             $PLATFORM = "arm64"
           }
           "PLATFORM=$PLATFORM" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
-
-      - name: 修复导入问题
-        run: |
-          python -c "
-import os
-os.makedirs('service/syncJob', exist_ok=True)
-
-job_client_code = '''class JobClient:
-    def __init__(self):
-        self.connected = False
-    
-    def connect(self, *args, **kwargs):
-        self.connected = True
-        return True
-    
-    def disconnect(self, *args, **kwargs):
-        self.connected = False
-        return True
-    
-    def execute(self, job_data, *args, **kwargs):
-        return {'status': 'success', 'data': job_data}
-    
-    def get_status(self, *args, **kwargs):
-        return {'status': 'idle', 'connected': self.connected}
-    
-    def is_connected(self, *args, **kwargs):
-        return self.connected
-
-jobClient = JobClient()
-'''
-
-with open('service/syncJob/jobClient.py', 'w') as f:
-    f.write(job_client_code)
-print('创建了 service/syncJob/jobClient.py')
-
-with open('service/syncJob/__init__.py', 'w') as f:
-    f.write('from .jobClient import jobClient\\nfrom .jobService import jobService')
-print('创建了 service/syncJob/__init__.py')
-"
 
       - name: 检出仓库代码
         uses: actions/checkout@v4
@@ -388,7 +225,7 @@ print('创建了 service/syncJob/__init__.py')
           path: dist/*.zip
 
   build-darwin:
-    name: 构建macOS
+    name: 构建darwin
     strategy:
       matrix:
         os:
@@ -410,45 +247,6 @@ print('创建了 service/syncJob/__init__.py')
             PLATFORM="arm64"
           fi
           echo "PLATFORM=$PLATFORM" >> $GITHUB_ENV
-
-      - name: 修复导入问题
-        run: |
-          python3 -c "
-import os
-os.makedirs('service/syncJob', exist_ok=True)
-
-job_client_code = '''class JobClient:
-    def __init__(self):
-        self.connected = False
-    
-    def connect(self, *args, **kwargs):
-        self.connected = True
-        return True
-    
-    def disconnect(self, *args, **kwargs):
-        self.connected = False
-        return True
-    
-    def execute(self, job_data, *args, **kwargs):
-        return {'status': 'success', 'data': job_data}
-    
-    def get_status(self, *args, **kwargs):
-        return {'status': 'idle', 'connected': self.connected}
-    
-    def is_connected(self, *args, **kwargs):
-        return self.connected
-
-jobClient = JobClient()
-'''
-
-with open('service/syncJob/jobClient.py', 'w') as f:
-    f.write(job_client_code)
-print('创建了 service/syncJob/jobClient.py')
-
-with open('service/syncJob/__init__.py', 'w') as f:
-    f.write('from .jobClient import jobClient\\nfrom .jobService import jobService')
-print('创建了 service/syncJob/__init__.py')
-"
 
       - name: 检出仓库代码
         uses: actions/checkout@v4
@@ -480,20 +278,15 @@ print('创建了 service/syncJob/__init__.py')
           retention-days: 1
 
   create-release:
-    name: 创建Release
+    name: 发布release
     runs-on: ubuntu-latest
-    needs: [get-version, build-windows, build-darwin, merge-manifests]
+    needs: [get-version, build-windows, build-darwin, build-docker]
     env:
       VERSION: ${{needs.get-version.outputs.VERSION}}
     if: ${{ !contains(needs.get-version.outputs.VERSION, 'dev') }}
-    
     steps:
-      - name: 获取GitHub用户名（小写）
-        id: get-gh-username
-        run: |
-          REPO_OWNER="${{ github.repository_owner }}"
-          LOWERCASE_OWNER=$(echo "$REPO_OWNER" | tr '[:upper:]' '[:lower:]')
-          echo "GH_USERNAME=$LOWERCASE_OWNER" >> $GITHUB_OUTPUT
+      - name: 检出仓库代码
+        uses: actions/checkout@v4
 
       - name: 下载构建结果
         uses: actions/download-artifact@v4
@@ -502,16 +295,20 @@ print('创建了 service/syncJob/__init__.py')
           path: dist
           merge-multiple: true
 
+      - name: 没有版本日志文件自动创建
+        run: |
+          version_first=$(echo $VERSION | cut -d'-' -f1)
+          LOG_FILE="doc/changelog/$version_first.md"
+          if [ ! -f "$LOG_FILE" ]; then
+            touch "$LOG_FILE"
+            echo "$VERSION" > "$LOG_FILE"
+          fi
+          echo "LOG_FILE=$LOG_FILE" >> "$GITHUB_ENV"
+
       - name: 创建release
         uses: softprops/action-gh-release@v2
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           tag_name: ${{ env.VERSION }}
-          name: "TaoSync v${{ env.VERSION }}"
-          body: |
-            ## 🎉 TaoSync ${{ env.VERSION }}
-            
-            ### 🐋 Docker 镜像（支持多架构）
-            
-            #### Docker Hub
+          files: dist/*
+          body_path: ${{ env.LOG_FILE }}
+          prerelease: ${{ contains(env.VERSION, 'dev') || contains(env.VERSION, 'pre') || contains(env.VERSION, 'beta') }}
