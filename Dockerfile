@@ -1,5 +1,6 @@
 FROM dr34m/tao-sync:not-for-use-pip-req as builder
 WORKDIR /app
+# 这里复制你的所有代码（包含魔改）
 COPY . /app
 RUN pyinstaller taoSync.spec
 
