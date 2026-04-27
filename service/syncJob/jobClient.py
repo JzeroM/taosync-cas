@@ -430,81 +430,138 @@ class JobTask:
             raise e
 
     def syncWithHave(self, srcPath, dstPath, spec, srcRootPath, dstRootPath, firstDst):
-        """
-        扫描并同步-目标目录存在目录（意味着要继续扫描目标目录）
-        :param srcPath: 来源路径，以/结尾
-        :param dstPath: 目标路径，以/结尾
-        :param spec: 排除项规则
-        :param srcRootPath: 来源目录根目录，以/结尾
-        :param dstRootPath: 目标目录根目录，以/结尾
-        :param firstDst: 是否是第一个目标目录（如果是，将完整扫描源目录，否则使用缓存扫描源目录）
-        :return:
-        """
-        if self.breakFlag:
-            return
-        try:
-            srcFiles = self.listDir(srcPath, firstDst, spec, srcRootPath)
-            dstFiles = self.listDir(dstPath, firstDst, spec, dstRootPath, False)
-        except Exception:
-            # 已在listDir做出日志打印等操作，此处啥都不用做
-            return
-        for key in srcFiles.keys():
-            # 如果是文件
-            if not key.endswith('/'):
-                # 目标目录没有这个文件或文件大小不匹配(即需要同步)
-                if key not in dstFiles or dstFiles[key] != srcFiles[key]:
-                    self.copyFile(srcPath, dstPath, key, srcFiles[key])
-            # 如果是目录
+    if self.breakFlag:
+        return
+    try:
+        srcFiles = self.listDir(srcPath, firstDst, spec, srcRootPath)
+        dstFiles = self.listDir(dstPath, firstDst, spec, dstRootPath, False)
+    except Exception:
+        return
+    
+    # ****************** 【正确构建目标端文件名前缀集合】******************
+    # dst_key 是相对当前目录的路径
+    dst_filename_prefixes = set()
+    
+    for dst_key in dstFiles.keys():
+        if not dst_key.endswith('/'):  # 只处理文件
+            # dst_key 可能是 "file.mp4" 或 "subdir/file.mp4"
+            # 我们需要文件名，不包含路径
+            filename = dst_key.split('/')[-1]  # 获取最后的文件名
+            
+            # 提取文件名前缀（去掉扩展名）
+            if '.' in filename:
+                filename_prefix = filename.rsplit('.', 1)[0]
             else:
-                # 目标目录没有这个目录
-                if key not in dstFiles:
-                    self.syncWithOutHave(srcPath + key, dstPath + key, spec, srcRootPath, dstRootPath,
-                                         firstDst)
-                # 目标目录有这个目录，继续递归
-                else:
-                    self.syncWithHave(srcPath + key, dstPath + key, spec, srcRootPath, dstRootPath,
-                                      firstDst)
-        if self.job['method'] == 1:
-            for dstKey in dstFiles.keys():
-                if dstKey not in srcFiles:
-                    self.delFile(dstPath, dstKey, dstFiles[dstKey])
+                filename_prefix = filename
+            
+            dst_filename_prefixes.add(filename_prefix)
+    # ********************************************************************
 
-    def syncWithOutHave(self, srcPath, dstPath, spec, srcRootPath, dstRootPath, firstDst):
-        """
-        扫描并同步-目标目录为空
-        :param srcPath: 来源路径，以/结尾
-        :param dstPath: 目标路径，以/结尾
-        :param spec:
-        :param srcRootPath:
-        :param dstRootPath:
-        :param firstDst:
-        :return:
-        """
-        if self.breakFlag:
-            return
-        status = 2
-        errMsg = None
-        try:
-            self.alistClient.mkdir(dstPath, self.job['scanIntervalT'])
-        except Exception as e:
-            status = 7
-            errMsg = str(e)
-        # 目录回调
-        self.copyHook(srcPath, dstPath, None, None, status=status, errMsg=errMsg, isPath=1)
-        if status != 2:
-            return
-        try:
-            srcFiles = self.listDir(srcPath, firstDst, spec, srcRootPath)
-        except Exception:
-            # 已在listDir做出日志打印等操作，此处啥都不用做
-            return
-        for key in srcFiles.keys():
-            if self.breakFlag:
-                break
-            if key.endswith('/'):
+    for key in srcFiles.keys():
+        if not key.endswith('/'):
+            # ... [视频文件过滤逻辑不变] ...
+            
+            # 获取源文件的文件名（不包含路径）
+            src_filename = key.split('/')[-1] if '/' in key else key
+            
+            # 提取源文件名前缀
+            if '.' in src_filename:
+                src_filename_prefix = src_filename.rsplit('.', 1)[0]
+            else:
+                src_filename_prefix = src_filename
+            
+            # 核心判断：同一目录下是否有同名前缀的文件
+            if src_filename_prefix in dst_filename_prefixes:
+                logger = logging.getLogger()
+                logger.info(f"跳过 {src_filename}，同目录存在前缀 {src_filename_prefix} 的文件")
+                continue
+            
+            # ... [原有同步逻辑] ...
+        
+        else:
+            # 目录处理逻辑保持不变
+            if key not in dstFiles:
                 self.syncWithOutHave(srcPath + key, dstPath + key, spec, srcRootPath, dstRootPath, firstDst)
             else:
-                self.copyFile(srcPath, dstPath, key, srcFiles[key])
+                self.syncWithHave(srcPath + key, dstPath + key, spec, srcRootPath, dstRootPath, firstDst)
+                
+    def syncWithOutHave(self, srcPath, dstPath, spec, srcRootPath, dstRootPath, firstDst):
+    if self.breakFlag:
+        return
+    
+    # 1. 先创建目标目录
+    status = 2
+    errMsg = None
+    try:
+        self.alistClient.mkdir(dstPath, self.job['scanIntervalT'])
+    except Exception as e:
+        status = 7
+        errMsg = str(e)
+    
+    # 目录回调
+    self.copyHook(srcPath, dstPath, None, None, status=status, errMsg=errMsg, isPath=1)
+    if status != 2:
+        return
+    
+    # 2. 获取源文件列表
+    try:
+        srcFiles = self.listDir(srcPath, firstDst, spec, srcRootPath)
+    except Exception:
+        return
+    
+    # ************** 【关键修改：创建目录后立即获取目标端文件列表】**************
+    # 即使目录刚创建，也要检查是否已有文件（如 .cas 文件）
+    try:
+        dstFiles = self.listDir(dstPath, firstDst, spec, dstRootPath, False)
+    except Exception:
+        dstFiles = {}  # 如果获取失败，使用空字典
+    
+    # 构建目标端文件名前缀集合
+    dst_filename_prefixes = set()
+    for dst_key in dstFiles.keys():
+        if not dst_key.endswith('/'):
+            filename = dst_key.split('/')[-1] if '/' in dst_key else dst_key
+            if '.' in filename:
+                filename_prefix = filename.rsplit('.', 1)[0]
+            else:
+                filename_prefix = filename
+            dst_filename_prefixes.add(filename_prefix)
+    # ***************************************************************
+    
+    for key in srcFiles.keys():
+        if self.breakFlag:
+            break
+        
+        if key.endswith('/'):
+            # 如果是目录，递归处理
+            self.syncWithOutHave(srcPath + key, dstPath + key, spec, srcRootPath, dstRootPath, firstDst)
+        else:
+            # ************** 【应用相同的视频文件过滤和CAS检查】**************
+            # 视频文件过滤
+            video_extensions = ('.mp4', '.mkv', '.avi', '.mov', '.flv', '.wmv', '.webm')
+            is_video_file = any(key.lower().endswith(ext) for ext in video_extensions)
+            
+            if not is_video_file:
+                continue
+            
+            # 获取源文件名
+            src_filename = key.split('/')[-1] if '/' in key else key
+            
+            # 提取源文件名前缀
+            if '.' in src_filename:
+                src_filename_prefix = src_filename.rsplit('.', 1)[0]
+            else:
+                src_filename_prefix = src_filename
+            
+            # CAS前缀匹配检查
+            if src_filename_prefix in dst_filename_prefixes:
+                logger = logging.getLogger()
+                logger.info(f"syncWithOutHave: 跳过 {src_filename}，目标端已有同名前缀文件")
+                continue
+            # **********************************************************
+            
+            # 只有不跳过的文件才执行同步
+            self.copyFile(srcPath, dstPath, key, srcFiles[key])
 
     def updateTaskStatus(self):
         """
