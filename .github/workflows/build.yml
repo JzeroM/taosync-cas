@@ -1,4 +1,4 @@
-name: 构建和推送Docker镜像
+name: 构建和推送Docker镜像（全架构）
 
 on:
   push:
@@ -7,7 +7,7 @@ on:
 
 env:
   APP_NAME: taoSync
-  DOCKER_USER: miuior
+  DOCKER_USER: jzerom
   DOCKER_NAME: taosync-cas
 
 jobs:
@@ -16,6 +16,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       VERSION: ${{ steps.getVersion.outputs.VERSION }}
+      TAG_LIST: ${{ steps.getVersion.outputs.TAG_LIST }}
 
     steps:
       - name: 检出仓库代码
@@ -25,7 +26,17 @@ jobs:
         name: 获取版本号
         run: |
           VERSION=$(head -n 1 version.txt | cut -d',' -f1)
+          # 获取所有版本标签
+          versions=$(head -n 1 version.txt)
+          tagList=""
+          IFS=',' read -ra versionList <<< "$versions"
+          for version in "${versionList[@]}"; do
+            tagList+="$version "
+          done
+          
           echo "VERSION=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "TAG_LIST=$tagList" >> "$GITHUB_OUTPUT"
+          echo "检测到版本: $tagList"
 
   build-frontend:
     name: 构建前端
@@ -65,22 +76,28 @@ jobs:
           path: frontend/dist
           retention-days: 1
 
-  build-docker:
-    name: 构建Docker镜像
+  build-docker-all-arch:
+    name: 构建Docker镜像（全架构）
     runs-on: ubuntu-latest
     needs: [ get-version, build-frontend ]
     env:
       VERSION: ${{ needs.get-version.outputs.VERSION }}
+    strategy:
+      matrix:
+        platform:
+          - linux/amd64
+          - linux/arm64
+          - linux/arm/v7
+          - linux/386
+          - linux/arm/v6
+          - linux/s390x
+          - linux/ppc64le
 
     steps:
-      - name: 检出仓库代码
-        uses: actions/checkout@v4
-
-      - name: 下载前端
-        uses: actions/download-artifact@v4
-        with:
-          name: frontend-dist
-          path: frontend/dist
+      - name: 替换平台名称中的斜杠为横杠
+        run: |
+          platform=${{ matrix.platform }}
+          echo "PLATFORM_PAIR=${platform//\//-}" >> $GITHUB_ENV
 
       - name: 设置QEMU
         uses: docker/setup-qemu-action@v3
@@ -97,12 +114,8 @@ jobs:
       - name: 获取GitHub用户名（小写）
         id: get-gh-username
         run: |
-          # GitHub Container Registry要求用户名全小写
-          # 从仓库信息获取所有者并转换为小写
           REPO_OWNER="${{ github.repository_owner }}"
           LOWERCASE_OWNER=$(echo "$REPO_OWNER" | tr '[:upper:]' '[:lower:]')
-          echo "GitHub用户名（原始）: $REPO_OWNER"
-          echo "GitHub用户名（小写）: $LOWERCASE_OWNER"
           echo "GH_USERNAME=$LOWERCASE_OWNER" >> $GITHUB_OUTPUT
 
       - name: 登录到GitHub Container Registry
@@ -112,45 +125,249 @@ jobs:
           username: ${{ github.repository_owner }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: 构建和推送镜像
+      - name: 检出仓库代码
+        uses: actions/checkout@v4
+
+      - name: 下载前端
+        uses: actions/download-artifact@v4
+        with:
+          name: frontend-dist
+          path: frontend/dist
+
+      - id: build-image
+        name: 构建docker镜像
         uses: docker/build-push-action@v6
         with:
           context: .
-          platforms: linux/amd64,linux/arm64
-          push: true
-          tags: |
-            ${{ env.DOCKER_USER }}/${{ env.DOCKER_NAME }}:latest
-            ${{ env.DOCKER_USER }}/${{ env.DOCKER_NAME }}:${{ env.VERSION }}
-            ghcr.io/${{ steps.get-gh-username.outputs.GH_USERNAME }}/${{ env.DOCKER_NAME }}:latest
-            ghcr.io/${{ steps.get-gh-username.outputs.GH_USERNAME }}/${{ env.DOCKER_NAME }}:${{ env.VERSION }}
+          platforms: ${{ matrix.platform }}
+          outputs: |
+            type=docker
+            type=image,name=${{ env.DOCKER_USER }}/${{ env.DOCKER_NAME }},push-by-digest=true,name-canonical=true,push=true
+            type=image,name=ghcr.io/${{ steps.get-gh-username.outputs.GH_USERNAME }}/${{ env.DOCKER_NAME }},push-by-digest=true,name-canonical=true,push=true
 
-      - name: 输出镜像信息
+      - name: 导出digest
         run: |
-          echo "🎉 Docker镜像构建完成！"
-          echo ""
-          echo "📦 镜像已推送到以下仓库:"
-          echo ""
-          echo "1. 🐋 Docker Hub:"
-          echo "   - docker pull $DOCKER_USER/$DOCKER_NAME:latest"
-          echo "   - docker pull $DOCKER_USER/$DOCKER_NAME:$VERSION"
-          echo ""
-          echo "2. 📦 GitHub Container Registry:"
-          echo "   - docker pull ghcr.io/${{ steps.get-gh-username.outputs.GH_USERNAME }}/$DOCKER_NAME:latest"
-          echo "   - docker pull ghcr.io/${{ steps.get-gh-username.outputs.GH_USERNAME }}/$DOCKER_NAME:$VERSION"
-          echo ""
-          echo "🔧 使用示例:"
-          echo "   docker run -d -p 8023:8023 $DOCKER_USER/$DOCKER_NAME:$VERSION"
-          echo "   或"
-          echo "   docker run -d -p 8023:8023 ghcr.io/${{ steps.get-gh-username.outputs.GH_USERNAME }}/$DOCKER_NAME:$VERSION"
+          mkdir -p /tmp/digests
+          digest="${{ steps.build-image.outputs.digest }}"
+          touch "/tmp/digests/${digest#sha256:}"
+
+      - name: 上传digest到artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: digests-${{ env.PLATFORM_PAIR }}
+          path: /tmp/digests/*
+          retention-days: 1
+
+      - name: 从镜像中提取可执行文件
+        run: |
+          docker create --name tmp ${{ steps.build-image.outputs.imageid }} /bin/true
+          docker cp tmp:/app/${{ env.APP_NAME }} ${{ env.APP_NAME }}
+          tar czf "$APP_NAME-$VERSION-$PLATFORM_PAIR.tar.gz" ${{ env.APP_NAME }}
+
+      - name: 上传可执行文件到artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist-${{ env.PLATFORM_PAIR }}
+          path: ${{ env.APP_NAME }}-${{ env.VERSION }}-${{ env.PLATFORM_PAIR }}.tar.gz
+          retention-days: 1
+
+  merge-manifests:
+    name: 合并镜像清单
+    runs-on: ubuntu-latest
+    needs: [get-version, build-docker-all-arch]
+    env:
+      VERSION: ${{ needs.get-version.outputs.VERSION }}
+    
+    steps:
+      - name: 下载digest
+        uses: actions/download-artifact@v4
+        with:
+          path: /tmp/digests
+          pattern: digests-*
+          merge-multiple: true
+
+      - name: 设置Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: 登录到DockerHub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ env.DOCKER_USER }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: 获取GitHub用户名（小写）
+        id: get-gh-username
+        run: |
+          REPO_OWNER="${{ github.repository_owner }}"
+          LOWERCASE_OWNER=$(echo "$REPO_OWNER" | tr '[:upper:]' '[:lower:]')
+          echo "GH_USERNAME=$LOWERCASE_OWNER" >> $GITHUB_OUTPUT
+
+      - name: 登录到GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 获取所有版本标签
+        id: get-all-tags
+        run: |
+          versions="${{ needs.get-version.outputs.TAG_LIST }}"
+          DOCKER_TAGS=""
+          GHCR_TAGS=""
+          
+          for tag in $versions; do
+            DOCKER_TAGS+="-t $DOCKER_USER/$DOCKER_NAME:$tag "
+            GHCR_TAGS+="-t ghcr.io/${{ steps.get-gh-username.outputs.GH_USERNAME }}/$DOCKER_NAME:$tag "
+          done
+          
+          # 添加latest标签
+          DOCKER_TAGS+="-t $DOCKER_USER/$DOCKER_NAME:latest "
+          GHCR_TAGS+="-t ghcr.io/${{ steps.get-gh-username.outputs.GH_USERNAME }}/$DOCKER_NAME:latest "
+          
+          echo "DOCKER_TAGS=$DOCKER_TAGS" >> $GITHUB_OUTPUT
+          echo "GHCR_TAGS=$GHCR_TAGS" >> $GITHUB_OUTPUT
+          echo "Docker Tags: $DOCKER_TAGS"
+          echo "GHCR Tags: $GHCR_TAGS"
+
+      - name: 为Docker Hub创建清单
+        working-directory: /tmp/digests
+        run: |
+          # 为每个版本创建多架构清单
+          versions="${{ needs.get-version.outputs.TAG_LIST }}"
+          
+          for tag in $versions latest; do
+            echo "创建Docker Hub清单: $DOCKER_USER/$DOCKER_NAME:$tag"
+            docker buildx imagetools create \
+              -t $DOCKER_USER/$DOCKER_NAME:$tag \
+              $(printf '${{ env.DOCKER_USER }}/${{ env.DOCKER_NAME }}@sha256:%s ' *)
+          done
+
+      - name: 为GitHub Container Registry创建清单
+        working-directory: /tmp/digests
+        run: |
+          # 为每个版本创建多架构清单
+          versions="${{ needs.get-version.outputs.TAG_LIST }}"
+          
+          for tag in $versions latest; do
+            echo "创建GHCR清单: ghcr.io/${{ steps.get-gh-username.outputs.GH_USERNAME }}/$DOCKER_NAME:$tag"
+            docker buildx imagetools create \
+              -t ghcr.io/${{ steps.get-gh-username.outputs.GH_USERNAME }}/$DOCKER_NAME:$tag \
+              $(printf 'ghcr.io/${{ steps.get-gh-username.outputs.GH_USERNAME }}/${{ env.DOCKER_NAME }}@sha256:%s ' *)
+          done
+
+  build-windows:
+    name: 构建Windows
+    strategy:
+      matrix:
+        os:
+          - windows-latest
+          - windows-11-arm
+    runs-on: ${{ matrix.os }}
+    needs: [get-version, build-frontend]
+    env:
+      VERSION: ${{needs.get-version.outputs.VERSION}}
+    if: ${{ !contains(needs.get-version.outputs.VERSION, 'dev') }}
+
+    steps:
+      - name: 判断平台
+        run: |
+          $os = "${{ matrix.os }}"
+          if ($os -eq "windows-latest") {
+            $PLATFORM = "amd64"
+          } else {
+            $PLATFORM = "arm64"
+          }
+          "PLATFORM=$PLATFORM" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: 检出仓库代码
+        uses: actions/checkout@v4
+
+      - name: 下载前端
+        uses: actions/download-artifact@v4
+        with:
+          name: frontend-dist
+          path: frontend/dist
+
+      - name: 设置python环境
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: 安装依赖并构建打包
+        run: |
+          python -m pip install 'pyinstaller>=6,<7'
+          python -m pip install -r requirements.txt
+          python -m PyInstaller ${{ env.APP_NAME }}.spec
+          cd dist && 7z a ${{ env.APP_NAME }}-${{ env.VERSION }}-windows-${{ env.PLATFORM }}.zip *
+
+      - name: 上传artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist-windows-${{ env.PLATFORM }}
+          path: dist/*.zip
+
+  build-darwin:
+    name: 构建macOS
+    strategy:
+      matrix:
+        os:
+          - macos-15-intel
+          - macos-14
+    runs-on: ${{ matrix.os }}
+    needs: [get-version, build-frontend]
+    env:
+      VERSION: ${{needs.get-version.outputs.VERSION}}
+    if: ${{ !contains(needs.get-version.outputs.VERSION, 'dev') }}
+
+    steps:
+      - name: 判断平台
+        run: |
+          os=${{ matrix.os }}
+          if [ "$os" = "macos-15-intel" ]; then
+            PLATFORM="amd64"
+          else
+            PLATFORM="arm64"
+          fi
+          echo "PLATFORM=$PLATFORM" >> $GITHUB_ENV
+
+      - name: 检出仓库代码
+        uses: actions/checkout@v4
+
+      - name: 下载前端
+        uses: actions/download-artifact@v4
+        with:
+          name: frontend-dist
+          path: frontend/dist
+
+      - name: 设置python环境
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: 安装依赖并构建打包
+        run: |
+          python -m pip install 'pyinstaller>=6,<7'
+          python -m pip install -r requirements.txt
+          python -m PyInstaller "$APP_NAME.spec"
+          cd dist
+          tar czf "$APP_NAME-$VERSION-darwin-$PLATFORM.tar.gz" .
+
+      - name: 上传artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist-darwin-${{ env.PLATFORM }}
+          path: dist/*.tar.gz
+          retention-days: 1
 
   create-release:
     name: 创建Release
     runs-on: ubuntu-latest
-    needs: [ get-version, build-docker ]
+    needs: [get-version, build-windows, build-darwin, merge-manifests]
     env:
-      VERSION: ${{ needs.get-version.outputs.VERSION }}
+      VERSION: ${{needs.get-version.outputs.VERSION}}
     if: ${{ !contains(needs.get-version.outputs.VERSION, 'dev') }}
-
+    
     steps:
       - name: 获取GitHub用户名（小写）
         id: get-gh-username
@@ -158,6 +375,13 @@ jobs:
           REPO_OWNER="${{ github.repository_owner }}"
           LOWERCASE_OWNER=$(echo "$REPO_OWNER" | tr '[:upper:]' '[:lower:]')
           echo "GH_USERNAME=$LOWERCASE_OWNER" >> $GITHUB_OUTPUT
+
+      - name: 下载构建结果
+        uses: actions/download-artifact@v4
+        with:
+          pattern: dist-*
+          path: dist
+          merge-multiple: true
 
       - name: 创建release
         uses: softprops/action-gh-release@v2
@@ -169,4 +393,6 @@ jobs:
           body: |
             ## 🎉 TaoSync ${{ env.VERSION }}
             
-            ### 🐋 Docker Hub
+            ### 🐋 Docker 镜像（支持多架构）
+            
+            #### Docker Hub
