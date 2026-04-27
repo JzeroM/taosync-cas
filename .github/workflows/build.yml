@@ -7,7 +7,7 @@ on:
 
 env:
   APP_NAME: taoSync
-  DOCKER_USER: dr34m
+  DOCKER_USER: miuior
   DOCKER_NAME: tao-sync
 
 jobs:
