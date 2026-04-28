@@ -4,10 +4,13 @@ FROM python:3.11-slim as builder
 # 设置工作目录
 WORKDIR /app
 
-# 安装系统依赖（如果需要编译某些包）
+# 安装系统依赖（用于编译某些Python包）
 RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc \
     g++ \
+    pkg-config \
+    libffi-dev \
+    libssl-dev \
     && rm -rf /var/lib/apt/lists/*
 
 # 复制依赖文件
@@ -16,16 +19,28 @@ COPY requirements.txt .
 # 安装 Python 依赖到用户目录
 RUN pip install --user --no-cache-dir -r requirements.txt
 
-# 复制源代码
+# 复制应用程序源代码
 COPY . .
 
 # 运行时阶段
 FROM python:3.11-slim
 
+# 设置时区
+ENV TZ=Asia/Shanghai
+RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
+
 # 设置环境变量
 ENV PYTHONPATH=/app \
     PYTHONUNBUFFERED=1 \
-    PATH=/root/.local/bin:$PATH
+    PYTHONDONTWRITEBYTECODE=1 \
+    PATH=/root/.local/bin:$PATH \
+    TAO_PORT=8023 \
+    TAO_EXPIRES=2 \
+    TAO_LOG_LEVEL=1 \
+    TAO_CONSOLE_LEVEL=2 \
+    TAO_LOG_SAVE=7 \
+    TAO_TASK_SAVE=0 \
+    TAO_TASK_TIMEOUT=72
 
 # 设置工作目录
 WORKDIR /app
@@ -42,22 +57,33 @@ RUN mkdir -p /app/data/logs \
     /app/data/config
 
 # 创建非 root 用户
-RUN groupadd -r taosync && useradd -r -g taosync -u 1000 taosync \
-    && chown -R taosync:taosync /app
+RUN groupadd -r taosync -g 1000 && \
+    useradd -r -u 1000 -g taosync -m -d /home/taosync -s /sbin/nologin taosync
 
 # 设置文件权限
-RUN chmod 755 /app \
-    && chmod 644 /app/*.py 2>/dev/null || true
+RUN chown -R taosync:taosync /app && \
+    chmod 755 /app && \
+    find /app -type f -name "*.py" -exec chmod 644 {} \; 2>/dev/null || true && \
+    chmod 755 /app/main.py
+
+# 确保数据目录可写
+RUN chown taosync:taosync /app/data && \
+    chmod 755 /app/data
+
+# 安装健康检查工具
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
 
 # 切换到非 root 用户
 USER taosync
 
-# 暴露端口（根据你的 config.ini 配置）
+# 暴露端口（根据你的 config.ini 配置或环境变量）
 EXPOSE 8023
 
 # 健康检查
-HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-    CMD python -c "import socket; s = socket.socket(); s.connect(('127.0.0.1', 8023))" 2>/dev/null || exit 1
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+    CMD curl -f http://localhost:8023/health 2>/dev/null || python -c "import socket; s = socket.socket(); s.connect(('127.0.0.1', 8023))"
 
 # 启动命令
 CMD ["python", "main.py"]
