@@ -31,12 +31,10 @@ jobs:
           IFS=',' read -ra versionList <<< "$versions"
           cuVersion="${versionList[0]}"
           
-          # 判断是否推送到 Docker Hub
           pushToDockerHub="false"
           for version in "${versionList[@]}"; do
             tagList+="-t $DOCKER_USER/$DOCKER_NAME:$version "
             
-            # 条件：版本不包含 dev/pre/beta 时才推送到 Docker Hub
             if [[ ! "$version" =~ (dev|pre|beta) ]]; then
               pushToDockerHub="true"
             fi
@@ -57,10 +55,10 @@ jobs:
       - name: 检出仓库代码
         uses: actions/checkout@v4
 
-      - name: 安装Node.js 14.x
+      - name: 安装Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: "14.x"
+          node-version: "16"
 
       - name: 安装依赖并构建前端
         run: |
@@ -69,7 +67,7 @@ jobs:
           npm install
           npm run build
 
-      - name: 上传artifact
+      - name: 上传前端构建结果
         uses: actions/upload-artifact@v4
         with:
           name: frontend-dist
@@ -82,7 +80,6 @@ jobs:
     needs: [ get-version, build-frontend ]
     env:
       VERSION: ${{ needs.get-version.outputs.VERSION }}
-      GHCR_REGISTRY: ghcr.io
       GHCR_IMAGE: ghcr.io/${{ github.repository_owner | lower }}/${{ env.DOCKER_NAME }}
       PUSH_TO_DOCKERHUB: ${{ needs.get-version.outputs.PUSH_TO_DOCKERHUB }}
     strategy:
@@ -97,16 +94,15 @@ jobs:
           - linux/ppc64le
 
     steps:
-      - name: 替换平台名称中的斜杠为横杠
-        run: |
-          platform=${{ matrix.platform }}
-          echo "PLATFORM_PAIR=${platform//\//-}" >> $GITHUB_ENV
-
       - name: 设置QEMU
         uses: docker/setup-qemu-action@v3
 
       - name: 设置Docker BuildX
         uses: docker/setup-buildx-action@v3
+        with:
+          driver-opts: |
+            image=moby/buildkit:master
+            network=host
 
       - name: 登录到DockerHub
         if: env.PUSH_TO_DOCKERHUB == 'true'
@@ -118,7 +114,7 @@ jobs:
       - name: 登录到GHCR
         uses: docker/login-action@v3
         with:
-          registry: ${{ env.GHCR_REGISTRY }}
+          registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
@@ -138,7 +134,7 @@ jobs:
           context: .
           platforms: ${{ matrix.platform }}
           push: false
-          outputs: type=docker
+          outputs: type=docker,compression=zstd
 
       - name: 推送到Docker Hub
         if: env.PUSH_TO_DOCKERHUB == 'true'
@@ -153,7 +149,6 @@ jobs:
           labels: |
             org.opencontainers.image.version=${{ env.VERSION }}
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
-            org.opencontainers.image.created=${{ fromJSON(env.GITHUB).head_commit.timestamp }}
 
       - name: 推送到GHCR
         uses: docker/build-push-action@v6
@@ -167,64 +162,6 @@ jobs:
           labels: |
             org.opencontainers.image.version=${{ env.VERSION }}
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
-            org.opencontainers.image.created=${{ fromJSON(env.GITHUB).head_commit.timestamp }}
-
-      - name: 导出digest
-        run: |
-          mkdir -p /tmp/digests
-          # 使用最后一次推送的digest
-          touch "/tmp/digests/placeholder"
-
-      - name: 上传digest到artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: digests-${{ env.PLATFORM_PAIR }}
-          path: /tmp/digests/*
-          retention-days: 1
-
-  merge-docker:
-    name: 合并Docker镜像清单
-    runs-on: ubuntu-latest
-    needs: [get-version, build-docker]
-    env:
-      TAG_LIST: ${{ needs.get-version.outputs.TAG_LIST }}
-      GHCR_IMAGE: ghcr.io/${{ github.repository_owner | lower }}/${{ env.DOCKER_NAME }}
-      PUSH_TO_DOCKERHUB: ${{ needs.get-version.outputs.PUSH_TO_DOCKERHUB }}
-    steps:
-      - name: 下载digest
-        uses: actions/download-artifact@v4
-        with:
-          path: /tmp/digests
-          pattern: digests-*
-          merge-multiple: true
-
-      - name: 设置Docker BuildX
-        uses: docker/setup-buildx-action@v3
-
-      - name: 登录到DockerHub
-        if: env.PUSH_TO_DOCKERHUB == 'true'
-        uses: docker/login-action@v3
-        with:
-          username: ${{ env.DOCKER_USER }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
-
-      - name: 登录到GHCR
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: 创建清单并推送到Docker Hub
-        if: env.PUSH_TO_DOCKERHUB == 'true'
-        working-directory: /tmp/digests
-        run: |
-          docker buildx imagetools create ${{ env.TAG_LIST }}$(printf '${{ env.DOCKER_USER }}/${{ env.DOCKER_NAME }}@sha256:%s ' *)
-
-      - name: 创建清单并推送到GHCR
-        working-directory: /tmp/digests
-        run: |
-          docker buildx imagetools create ${{ env.TAG_LIST }}$(printf '${{ env.GHCR_IMAGE }}@sha256:%s ' *)
 
   build-source-packages:
     name: 构建源代码包
@@ -243,19 +180,13 @@ jobs:
           name: frontend-dist
           path: frontend/dist
 
-      - name: 创建Linux源码包
+      - name: 创建源码包
         run: |
-          # 创建干净的发布目录
           mkdir -p taosync-$VERSION
-          
-          # 复制Python源码
           cp -r *.py *.txt *.spec service/ common/ controller/ mapper/ taosync-$VERSION/
-          
-          # 复制前端构建结果
           mkdir -p taosync-$VERSION/frontend/dist
           cp -r frontend/dist/* taosync-$VERSION/frontend/dist/
           
-          # 创建启动脚本
           cat > taosync-$VERSION/start.sh << 'EOF'
 #!/bin/bash
 cd "$(dirname "$0")"
@@ -266,7 +197,6 @@ python main.py
 EOF
           chmod +x taosync-$VERSION/start.sh
           
-          # 创建Windows启动脚本
           cat > taosync-$VERSION/start.bat << 'EOF'
 @echo off
 cd /d "%~dp0"
@@ -276,47 +206,24 @@ pip install -r requirements.txt
 python main.py
 EOF
           
-          # 压缩打包
-          tar czf "taosync-$VERSION-linux-source.tar.gz" taosync-$VERSION/
-          
-          # 创建纯Python包（不包含venv）
-          mkdir -p taosync-python-$VERSION
-          cp -r *.py *.txt *.spec service/ common/ controller/ mapper/ frontend/dist/ taosync-python-$VERSION/
-          tar czf "taosync-$VERSION-python-only.tar.gz" taosync-python-$VERSION/
+          tar czf "taosync-$VERSION-source.tar.gz" taosync-$VERSION/
 
-      - name: 上传源码包artifact
+      - name: 上传源码包
         uses: actions/upload-artifact@v4
         with:
-          name: source-packages
-          path: |
-            taosync-$VERSION-linux-source.tar.gz
-            taosync-$VERSION-python-only.tar.gz
+          name: source-package
+          path: taosync-$VERSION-source.tar.gz
           retention-days: 1
 
   build-windows-python:
-    name: 构建Windows Python包
-    strategy:
-      matrix:
-        os:
-          - windows-latest
-          - windows-11-arm
-    runs-on: ${{ matrix.os }}
+    name: 构建Windows包
+    runs-on: windows-latest
     needs: [get-version, build-frontend]
     env:
       VERSION: ${{needs.get-version.outputs.VERSION}}
     if: ${{ !contains(needs.get-version.outputs.VERSION, 'dev') }}
 
     steps:
-      - name: 判断平台
-        run: |
-          $os = "${{ matrix.os }}"
-          if ($os -eq "windows-latest") {
-            $PLATFORM = "amd64"
-          } else {
-            $PLATFORM = "arm64"
-          }
-          "PLATFORM=$PLATFORM" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
-
       - name: 检出仓库代码
         uses: actions/checkout@v4
 
@@ -326,23 +233,20 @@ EOF
           name: frontend-dist
           path: frontend/dist
 
-      - name: 创建Windows Python包
+      - name: 创建Windows包
         run: |
-          # 创建发布目录
-          $releaseDir = "taosync-$env:VERSION-windows-$env:PLATFORM"
+          $releaseDir = "taosync-$env:VERSION-windows-amd64"
           New-Item -ItemType Directory -Force -Path $releaseDir
           
-          # 复制所有必要文件
           Copy-Item -Path *.py,*.txt,*.spec -Destination $releaseDir/ -Force
           Copy-Item -Path service/,common/,controller/,mapper/ -Destination $releaseDir/ -Recurse -Force
           New-Item -ItemType Directory -Force -Path "$releaseDir/frontend/dist"
           Copy-Item -Path frontend/dist/* -Destination "$releaseDir/frontend/dist/" -Recurse -Force
           
-          # 创建启动脚本
           $startBat = @'
 @echo off
 cd /d "%~dp0"
-echo 正在检查Python环境...
+echo 检查Python环境...
 python --version >nul 2>&1
 if errorlevel 1 (
     echo 错误: 未找到Python，请先安装Python 3.11+
@@ -351,7 +255,7 @@ if errorlevel 1 (
     exit /b 1
 )
 
-echo 正在安装依赖...
+echo 安装依赖...
 pip install -r requirements.txt
 if errorlevel 1 (
     echo 错误: 依赖安装失败
@@ -365,7 +269,6 @@ pause
 '@
           $startBat | Out-File -FilePath "$releaseDir/start-taosync.bat" -Encoding UTF8
           
-          # 创建简化版启动脚本（无依赖安装）
           $simpleBat = @'
 @echo off
 cd /d "%~dp0"
@@ -373,39 +276,23 @@ python main.py
 '@
           $simpleBat | Out-File -FilePath "$releaseDir/taosync.bat" -Encoding UTF8
           
-          # 压缩打包
-          Compress-Archive -Path $releaseDir/* -DestinationPath "taosync-$env:VERSION-windows-$env:PLATFORM.zip" -Force
+          Compress-Archive -Path $releaseDir/* -DestinationPath "taosync-$env:VERSION-windows-amd64.zip" -Force
 
-      - name: 上传Windows包artifact
+      - name: 上传Windows包
         uses: actions/upload-artifact@v4
         with:
-          name: dist-windows-${{ env.PLATFORM }}
-          path: taosync-${{ env.VERSION }}-windows-${{ env.PLATFORM }}.zip
+          name: windows-package
+          path: taosync-${{ env.VERSION }}-windows-amd64.zip
 
   build-darwin-python:
-    name: 构建macOS Python包
-    strategy:
-      matrix:
-        os:
-          - macos-15-intel
-          - macos-14
-    runs-on: ${{ matrix.os }}
+    name: 构建macOS包
+    runs-on: macos-latest
     needs: [get-version, build-frontend]
     env:
       VERSION: ${{needs.get-version.outputs.VERSION}}
     if: ${{ !contains(needs.get-version.outputs.VERSION, 'dev') }}
 
     steps:
-      - name: 判断平台
-        run: |
-          os=${{ matrix.os }}
-          if [ "$os" = "macos-15-intel" ]; then
-            PLATFORM="amd64"
-          else
-            PLATFORM="arm64"
-          fi
-          echo "PLATFORM=$PLATFORM" >> $GITHUB_ENV
-
       - name: 检出仓库代码
         uses: actions/checkout@v4
 
@@ -415,19 +302,16 @@ python main.py
           name: frontend-dist
           path: frontend/dist
 
-      - name: 创建macOS Python包
+      - name: 创建macOS包
         run: |
-          # 创建发布目录
-          RELEASE_DIR="taosync-$VERSION-macos-$PLATFORM"
+          RELEASE_DIR="taosync-$VERSION-macos-universal"
           mkdir -p "$RELEASE_DIR"
           
-          # 复制文件
           cp *.py *.txt *.spec "$RELEASE_DIR/" 2>/dev/null || true
           cp -r service common controller mapper "$RELEASE_DIR/"
           mkdir -p "$RELEASE_DIR/frontend/dist"
           cp -r frontend/dist/* "$RELEASE_DIR/frontend/dist/"
           
-          # 创建启动脚本
           cat > "$RELEASE_DIR/start-taosync.sh" << 'EOF'
 #!/bin/bash
 cd "$(dirname "$0")"
@@ -451,7 +335,6 @@ python3 main.py
 EOF
           chmod +x "$RELEASE_DIR/start-taosync.sh"
           
-          # 创建简化版启动脚本
           cat > "$RELEASE_DIR/taosync.sh" << 'EOF'
 #!/bin/bash
 cd "$(dirname "$0")"
@@ -459,20 +342,19 @@ python3 main.py
 EOF
           chmod +x "$RELEASE_DIR/taosync.sh"
           
-          # 压缩打包
-          tar czf "taosync-$VERSION-macos-$PLATFORM.tar.gz" "$RELEASE_DIR/"
+          tar czf "taosync-$VERSION-macos-universal.tar.gz" "$RELEASE_DIR/"
 
-      - name: 上传macOS包artifact
+      - name: 上传macOS包
         uses: actions/upload-artifact@v4
         with:
-          name: dist-darwin-${{ env.PLATFORM }}
-          path: taosync-${{ env.VERSION }}-macos-${{ env.PLATFORM }}.tar.gz
+          name: darwin-package
+          path: taosync-${{ env.VERSION }}-macos-universal.tar.gz
           retention-days: 1
 
   create-release:
-    name: 发布release
+    name: 发布Release
     runs-on: ubuntu-latest
-    needs: [get-version, build-windows-python, build-darwin-python, build-source-packages, build-docker, merge-docker]
+    needs: [get-version, build-windows-python, build-darwin-python, build-source-packages, build-docker]
     env:
       VERSION: ${{needs.get-version.outputs.VERSION}}
     if: ${{ !contains(needs.get-version.outputs.VERSION, 'dev') }}
@@ -483,36 +365,32 @@ EOF
       - name: 下载所有构建结果
         uses: actions/download-artifact@v4
         with:
-          pattern: dist-*
-          path: dist
+          path: artifacts
+          pattern: '*'
           merge-multiple: true
 
-      - name: 下载源码包
-        uses: actions/download-artifact@v4
-        with:
-          name: source-packages
-          path: dist
-
-      - name: 没有版本日志文件自动创建
+      - name: 创建版本日志
         run: |
           version_first=$(echo $VERSION | cut -d'-' -f1)
-          LOG_FILE="doc/changelog/$version_first.md"
-          if [ ! -f "$LOG_FILE" ]; then
-            touch "$LOG_FILE"
-            echo "# $VERSION" > "$LOG_FILE"
+          LOG_FILE="changelog-$version_first.md"
+          
+          if [ -f "doc/changelog/$version_first.md" ]; then
+            cp "doc/changelog/$version_first.md" "$LOG_FILE"
+          else
+            echo "# 版本 $VERSION" > "$LOG_FILE"
             echo "" >> "$LOG_FILE"
-            echo "## 新特性" >> "$LOG_FILE"
-            echo "- 首次发布" >> "$LOG_FILE"
+            echo "## 更新内容" >> "$LOG_FILE"
+            echo "- 自动构建发布" >> "$LOG_FILE"
             echo "" >> "$LOG_FILE"
-            echo "## 修复" >> "$LOG_FILE"
-            echo "- 无" >> "$LOG_FILE"
+            echo "## Docker镜像" >> "$LOG_FILE"
+            echo "- Docker Hub: \`miuior/taosync-cas:$VERSION\`" >> "$LOG_FILE"
+            echo "- GitHub Container Registry: \`ghcr.io/jzerom/taosync-cas:$VERSION\`" >> "$LOG_FILE"
           fi
-          echo "LOG_FILE=$LOG_FILE" >> "$GITHUB_ENV"
 
-      - name: 创建release
+      - name: 创建Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ env.VERSION }}
-          files: dist/*
-          body_path: ${{ env.LOG_FILE }}
+          files: artifacts/**/*
+          body_path: changelog-${{ env.VERSION }}.md
           prerelease: ${{ contains(env.VERSION, 'dev') || contains(env.VERSION, 'pre') || contains(env.VERSION, 'beta') }}
