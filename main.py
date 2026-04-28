@@ -12,7 +12,7 @@ from service.system import onStart
 
 class MainIndex(RequestHandler):
     def get(self):
-        self.render(os.path.join(frontendPath, "public/index.html"))
+        self.render(os.path.join(frontendPath, "front/index.html"))
 
 
 def make_app():
@@ -26,7 +26,7 @@ def make_app():
         (r"/svr/notify", notifyController.Notify),
         (r"/", MainIndex),
         (r"/(.*)", StaticFileHandler,
-         {"path": os.path.join(frontendPath, "public")})
+         {"path": os.path.join(frontendPath, "front")})
     ], cookie_secret=server['passwdStr'])
 
 
