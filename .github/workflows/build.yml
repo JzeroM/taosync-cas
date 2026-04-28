@@ -112,6 +112,18 @@ jobs:
           name: frontend-dist
           path: frontend/dist
       
+      - name: 创建前端符号链接
+        run: |
+          # 方案三：创建符号链接
+          echo "当前目录结构:"
+          ls -la
+          echo "创建符号链接 front -> frontend/dist"
+          ln -snf $PWD/frontend/dist $PWD/front
+          echo "符号链接创建结果:"
+          ls -la front/
+          echo "验证前端文件:"
+          ls -la frontend/dist/
+      
       - name: 推送到Docker Hub
         if: env.PUSH_TO_DOCKERHUB == 'true'
         uses: docker/build-push-action@v6
@@ -156,12 +168,19 @@ jobs:
           name: frontend-dist
           path: frontend/dist
       
+      - name: 创建符号链接
+        run: |
+          ln -snf $PWD/frontend/dist $PWD/front
+      
       - name: 创建源码包
         run: |
           mkdir -p "taosync-$VERSION"
           cp -r *.py *.txt *.spec service/ common/ controller/ mapper/ "taosync-$VERSION/"
           mkdir -p "taosync-$VERSION/frontend/dist"
           cp -r frontend/dist/* "taosync-$VERSION/frontend/dist/"
+          
+          # 在源码包中也创建符号链接
+          ln -snf frontend/dist "taosync-$VERSION/front"
           
           cat > "taosync-$VERSION/start.sh" << 'EOF'
           #!/bin/bash
@@ -200,6 +219,11 @@ jobs:
           name: frontend-dist
           path: frontend/dist
       
+      - name: 创建符号链接
+        shell: cmd
+        run: |
+          mklink /D front frontend\dist
+      
       - name: 创建Windows包
         run: |
           $releaseDir = "taosync-$env:VERSION-windows-amd64"
@@ -236,6 +260,10 @@ jobs:
         with:
           name: frontend-dist
           path: frontend/dist
+      
+      - name: 创建符号链接
+        run: |
+          ln -snf $PWD/frontend/dist $PWD/front
       
       - name: 创建macOS包
         run: |
@@ -287,7 +315,6 @@ jobs:
       - name: 创建Release
         uses: softprops/action-gh-release@v2
         with:
-          # 关键修复：添加 tag_name 参数
           tag_name: ${{ env.VERSION }}
           files: |
             taosync-${{ env.VERSION }}-windows-amd64.zip
