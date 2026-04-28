@@ -131,8 +131,13 @@ jobs:
           context: .
           platforms: linux/amd64,linux/arm64,linux/arm/v7
           push: true
-          tags: ${{ env.DOCKER_USER }}/${{ env.DOCKER_NAME }}:${{ env.VERSION }},${{ env.DOCKER_USER }}/${{ env.DOCKER_NAME }}:latest,${{ github.repository_owner }}/${{ env.DOCKER_NAME }}:${{ env.VERSION }}
-          labels: org.opencontainers.image.version=${{ env.VERSION }},org.opencontainers.image.source=https://github.com/${{ github.repository }}
+          tags: |
+            ${{ env.DOCKER_USER }}/${{ env.DOCKER_NAME }}:${{ env.VERSION }}
+            ${{ env.DOCKER_USER }}/${{ env.DOCKER_NAME }}:latest
+            ghcr.io/${{ github.repository_owner }}/${{ env.DOCKER_NAME }}:${{ env.VERSION }}
+          labels: |
+            org.opencontainers.image.version=${{ env.VERSION }}
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
 
   build-source-packages:
     name: 构建源码包
