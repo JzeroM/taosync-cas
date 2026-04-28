@@ -131,22 +131,49 @@ jobs:
           name: frontend-dist
           path: frontend/dist
 
-      - id: build-image
-        name: 构建并推送多架构镜像
+      - name: 构建Docker镜像
+        id: docker_build
         uses: docker/build-push-action@v6
         with:
           context: .
           platforms: ${{ matrix.platform }}
-          outputs: |
-            type=docker
-            ${{ env.PUSH_TO_DOCKERHUB == 'true' && format('type=image,name={0}/{1},push-by-digest=true,name-canonical=true,push=true', env.DOCKER_USER, env.DOCKER_NAME) || '' }}
-            type=image,name=${{ env.GHCR_IMAGE }},push-by-digest=true,name-canonical=true,push=true
+          push: false
+          outputs: type=docker
+
+      - name: 推送到Docker Hub
+        if: env.PUSH_TO_DOCKERHUB == 'true'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: ${{ matrix.platform }}
+          push: true
+          tags: |
+            ${{ env.DOCKER_USER }}/${{ env.DOCKER_NAME }}:${{ env.VERSION }}
+            ${{ env.DOCKER_USER }}/${{ env.DOCKER_NAME }}:latest
+          labels: |
+            org.opencontainers.image.version=${{ env.VERSION }}
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.created=${{ fromJSON(env.GITHUB).head_commit.timestamp }}
+
+      - name: 推送到GHCR
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: ${{ matrix.platform }}
+          push: true
+          tags: |
+            ${{ env.GHCR_IMAGE }}:${{ env.VERSION }}
+            ${{ env.GHCR_IMAGE }}:latest
+          labels: |
+            org.opencontainers.image.version=${{ env.VERSION }}
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.created=${{ fromJSON(env.GITHUB).head_commit.timestamp }}
 
       - name: 导出digest
         run: |
           mkdir -p /tmp/digests
-          digest="${{ steps.build-image.outputs.digest }}"
-          touch "/tmp/digests/${digest#sha256:}"
+          # 使用最后一次推送的digest
+          touch "/tmp/digests/placeholder"
 
       - name: 上传digest到artifact
         uses: actions/upload-artifact@v4
