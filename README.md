@@ -25,14 +25,15 @@
     </a>
   </div>
 </div>
-
 ---
+本程序魔改自`taoSync`
+目的在于配合魔改的openlist利用监控新增同步，实现自动化搬运其他网盘资源到天翼云盘，生成cas文件后，仅保留cas文件，删除同步过来的原视频文件，解决因删除原视频文件而导致重复同步的问题，
+主逻辑在于只比对文件扩展名前面的文件名
+完整前缀有同名的一律跳过不再重复去同步
 
-桃桃是我女儿的乳名，我是桃桃她爸，这也是本程序的logo。
-
-本程序开发之初，主要是为了保存桃桃成长的照片，故名`taoSync`
-
-**如果好用，请Star！非常感谢！**  [GitHub](https://github.com/dr34m-cn/taosync) [Gitee](https://gitee.com/dr34m/taosync) [DockerHub](https://hub.docker.com/r/dr34m/tao-sync)
+**如果好用，请Star！非常感谢！** 
+[GitHub](https://github.com/JzeroM/taosync-cas) 
+[DockerHub(https://hub.docker.com/r/miuior/taosync-cas)
 
 <details>
 
@@ -73,23 +74,7 @@
 ## 须知
 
 > [!IMPORTANT]
-> 使用本工具前你必须了解并且会使用[OpenList](https://docs.oplist.org/zh/)；本工具没有集成`OpenList`，你需要额外启动`OpenList`
-
-> [!WARNING]
-> **警告！不要在外网暴露本系统，否则后果自负！**         
-> 本系统已经做了一定的安全方面的工作，但仍不能保证绝对安全。如确实需要，请务必使用强密码，并使用`SSL`
-
-## 用途举例
-
-#### 1. 同步备份
-
-把本地文件备份到多个网盘或FTP之类的存储，或者在多个网盘之间同步文件等；
-
-可以定时扫描指定目录下文件差异，让目标目录与源目录相同（全同步模式）；或仅新增存在于源目录，却不存在于目标目录的文件（仅新增模式）
-
-#### 2. 定时下载
-
-可以设置一次性任务（`cron`方式设置年月日时分秒，将在指定时间执行一次），可在闲时自动从特定网盘下载文件到本地
+> 使用本工具前你必须了解并且会使用魔改的[OpenList]，本工具没有集成`OpenList`，你需要额外启动`OpenList`
 
 ## 特性
 
@@ -104,8 +89,7 @@
   * linux-arm-v6
   * linux-arm-v7
   * linux-s390x
-  * linux-ppc64le
-* [Github Actions](https://docs.github.com/zh/actions)自动打包与发布构建好的可执行程序，过程公开透明，无投毒风险
+  * 
 * 支持Docker，下载即用
 * 干净卸载，不用的时候删掉即可，无任何残留或依赖，不影响系统里其他程序
 * 密码加密不可逆，永远不会泄露您的密码，敏感信息均被加密，支持重置密码
