@@ -3,28 +3,34 @@
 import os
 import sys
 
-# 获取项目根目录路径，解决 pathex 问题
-project_root = os.path.dirname(os.path.abspath(__file__))
+# 🔧 修复：使用 getcwd() 替代 __file__，解决 Docker 构建环境报错
+project_root = os.getcwd()
+
+# 添加项目根目录到 Python 路径，确保 PyInstaller 能搜索到自定义包
+sys.path.insert(0, project_root)
+
+block_cipher = None
 
 a = Analysis(
-    # 1. 入口文件
+    # 1. 主入口文件
     ['main.py'],
     
-    # 2. 搜索路径：添加项目根目录，确保能找到 common, service 等自定义包
+    # 2. 搜索路径：关键！指向项目根目录，解决 ModuleNotFoundError
     pathex=[project_root],
     
     # 3. 二进制依赖（如无特殊 C 库，通常为空）
     binaries=[],
     
-    # 4. 数据文件：前端静态资源（关键！）
+    # 4. 数据文件：前端静态资源（Vue 编译后的 dist 目录）
     datas=[
-        ('frontend/dist/', 'front'),
-        ('logo.ico', '.')  # 可选：如果你希望 exe 内嵌图标
+        ('frontend/dist', 'frontend/dist'),
+        ('logo.ico', '.'),
+        ('data', 'data')  # 包含配置文件、数据库等
     ],
     
-    # 5. 【核心修复】隐藏导入：手动指定 PyInstaller 无法自动分析的自定义模块
+    # 5. 【核心】隐藏导入：显式声明所有自定义模块，防止打包遗漏
     hiddenimports=[
-        # Service 层（解决 ImportError: jobClient）
+        # Service 层（解决 jobClient 等导入错误）
         'service.syncJob.jobClient',
         'service.syncJob.jobService',
         'service.alist.alistClient',
@@ -54,19 +60,19 @@ a = Analysis(
         'pathspec.patterns.gitwildmatch'
     ],
     
-    # 6. 钩子与排除配置
+    # 6. 其他配置
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=[],  # 可在此排除不需要的库（如调试模块）以减小体积
-    
-    # 7. 打包选项
-    noarchive=False,  # False 表示打包为单文件（或单目录）的压缩形式
-    optimize=0,       # 优化级别，0 为不优化（保持调试信息）
+    excludes=[],  # 可在此排除不需要的库以减小体积
+    win_no_prefer_redirects=False,
+    win_private_assemblies=False,
+    cipher=block_cipher,
+    noarchive=False  # False 表示打包为压缩形式
 )
 
 # 构建 PYZ 归档（包含纯 Python 模块）
-pyz = PYZ(a.pure)
+pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
 
 # 构建可执行文件 (EXE)
 exe = EXE(
@@ -84,7 +90,7 @@ exe = EXE(
     bootloader_ignore_signals=False,
     strip=False,              # 保留符号信息（False 更稳定）
     upx=True,                 # 启用 UPX 压缩（减小体积）
-    upx_exclude=[],          # UPX 排除列表
+    upx_exclude=[],
     
     # 运行时配置
     runtime_tmpdir=None,      # 单文件模式解压的临时目录
@@ -97,7 +103,7 @@ exe = EXE(
     codesign_identity=None,   # macOS 代码签名（暂无）
     entitlements_file=None,   # macOS 权限文件（暂无）
     
-    # 图标（这里设置会覆盖外部图标，确保 logo.ico 文件存在）
+    # 图标配置（确保 logo.ico 文件存在）
     icon=os.path.join(project_root, 'logo.ico')
 )
 
