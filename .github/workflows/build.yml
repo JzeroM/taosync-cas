@@ -265,9 +265,9 @@ jobs:
   create-release:
     name: 创建发布
     runs-on: ubuntu-latest
-    needs: [build-windows-package, build-macos-package, build-source-packages, build-docker]
+    needs: [build-windows-package, build-macos-package, build-source-packages, build-docker, get-version]
     env:
-      VERSION: ${{ needs.build-docker.env.VERSION }}
+      VERSION: ${{ needs.get-version.outputs.VERSION }}
     
     steps:
       - name: 检出代码
@@ -287,6 +287,7 @@ jobs:
       - name: 创建Release
         uses: softprops/action-gh-release@v2
         with:
+          # 关键修复：添加 tag_name 参数
           tag_name: ${{ env.VERSION }}
           files: |
             taosync-${{ env.VERSION }}-windows-amd64.zip
