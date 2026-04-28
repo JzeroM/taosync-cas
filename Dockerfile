@@ -1,33 +1,31 @@
-# 第一阶段：构建阶段
+# 第一阶段：构建阶段 (针对 macOS)
 FROM dr34m/tao-sync:not-for-use-pip-req AS builder
 
 WORKDIR /app
-# 复制项目所有文件
 COPY . .
 
-# 🔧 关键修复1：安装依赖并清理缓存
-# 🔧 关键修复2：创建 PyInstaller 打包时需要的 /app/data 目录
+# 🔧 关键修复：安装依赖并清理缓存
+# 🔧 关键修复：创建 PyInstaller 打包时需要的 data 目录
 RUN pip install -r requirements.txt && \
     rm -rf build/ dist/ && \
     mkdir -p /app/data && \
     pyinstaller --clean taoSync.spec
 
-# 第二阶段：运行阶段
+# 第二阶段：运行阶段 (Alpine Linux)
 FROM dr34m/tao-sync:not-for-use-alpine
 
-# 🔧 可选修复：添加 Alpine Linux 运行环境依赖（提高兼容性）
-RUN apk add --no-cache libstdc++ musl-dev
-
-# 设置工作目录
 WORKDIR /app
+
+# 🔧 可选修复：添加 Alpine Linux 运行环境依赖
+RUN apk add --no-cache libstdc++ musl-dev
 
 # 从构建阶段复制可执行文件
 COPY --from=builder /app/dist/taoSync /app/
 
-# 🔧 关键修复3：确保可执行文件有运行权限
+# 🔧 关键修复：确保可执行文件有运行权限
 RUN chmod +x /app/taoSync
 
-# 声明数据卷（用户需挂载持久化目录）
+# 声明数据卷
 VOLUME /app/data
 
 # 设置环境变量
