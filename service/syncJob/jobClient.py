@@ -436,6 +436,10 @@ class JobTask:
         """
         if self.breakFlag:
             return
+            
+        # 添加 logger 初始化
+        logger = logging.getLogger()
+        
         try:
             srcFiles = self.listDir(srcPath, firstDst, spec, srcRootPath)
             dstFiles = self.listDir(dstPath, firstDst, spec, dstRootPath, False)
@@ -505,7 +509,10 @@ class JobTask:
         """
         if self.breakFlag:
             return
-        
+            
+        # 添加 logger 初始化
+        logger = logging.getLogger()
+
         # 1. 先创建目标目录
         status = 2
         errMsg = None
