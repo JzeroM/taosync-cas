@@ -4,7 +4,7 @@ FROM python:3.11-slim as builder
 # 设置工作目录
 WORKDIR /app
 
-# 安装系统依赖（用于编译某些Python包）
+# 安装系统依赖
 RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc \
     g++ \
@@ -16,11 +16,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # 复制依赖文件
 COPY requirements.txt .
 
-# 安装 Python 依赖到用户目录
-RUN pip install --user --no-cache-dir -r requirements.txt
+# 安装 Python 依赖
+RUN pip install --no-cache-dir -r requirements.txt
 
 # 复制应用程序源代码
 COPY . .
+
+# 创建前端符号链接（方案三核心修复）
+RUN ln -snf /app/frontend/dist /app/front
 
 # 运行时阶段
 FROM python:3.11-slim
@@ -33,7 +36,7 @@ RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
 ENV PYTHONPATH=/app \
     PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
-    PATH=/root/.local/bin:$PATH \
+    PATH=/usr/local/bin:$PATH \
     TAO_PORT=8023 \
     TAO_EXPIRES=2 \
     TAO_LOG_LEVEL=1 \
@@ -42,7 +45,7 @@ ENV PYTHONPATH=/app \
     TAO_TASK_SAVE=0 \
     TAO_TASK_TIMEOUT=72
 
-# 安装健康检查工具
+# 安装运行时依赖
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     && rm -rf /var/lib/apt/lists/*
@@ -51,18 +54,27 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /app
 
 # 从构建阶段复制已安装的包
-COPY --from=builder /root/.local /root/.local
+COPY --from=builder /usr/local/lib/python3.11/site-packages /usr/local/lib/python3.11/site-packages
+COPY --from=builder /usr/local/bin /usr/local/bin
 
 # 复制应用程序代码
 COPY --from=builder /app /app
+
+# 确保符号链接存在
+RUN ln -snf /app/frontend/dist /app/front
 
 # 创建必要的目录结构
 RUN mkdir -p /app/data/logs \
     /app/data/temp \
     /app/data/config
 
-# 设置文件权限（确保 data 目录可写）
+# 设置文件权限
 RUN chmod 755 /app/data
+
+# 验证前端文件结构
+RUN echo "验证前端文件结构：" && \
+    echo "front/index.html 存在: $(if [ -f /app/front/index.html ]; then echo '✅'; else echo '❌'; fi)" && \
+    echo "frontend/dist/index.html 存在: $(if [ -f /app/frontend/dist/index.html ]; then echo '✅'; else echo '❌'; fi)"
 
 # 暴露端口
 EXPOSE 8023
