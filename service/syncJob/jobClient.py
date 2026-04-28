@@ -475,8 +475,10 @@ class JobTask:
                     logger = logging.getLogger()
                     logger.info(f"跳过 {src_filename}，同目录存在前缀 {src_filename_prefix} 的文件")
                     continue
-                
-                # ... [原有同步逻辑] ...
+                else:
+                    # ********** 【不跳过就直接执行同步】**********
+                    logger.info(f"同步 {src_filename}")
+                    self.copyFile(srcPath, dstPath, key, srcFiles[key])
             
             else:
                 # 目录处理逻辑保持不变
@@ -558,10 +560,10 @@ class JobTask:
                     logger = logging.getLogger()
                     logger.info(f"syncWithOutHave: 跳过 {src_filename}，目标端已有同名前缀文件")
                     continue
-                # **********************************************************
-                
-                # 只有不跳过的文件才执行同步
-                self.copyFile(srcPath, dstPath, key, srcFiles[key])
+                else:
+                    # ********** 【不跳过就直接执行同步】**********
+                    logger.info(f"syncWithOutHave: 同步 {src_filename}")
+                    self.copyFile(srcPath, dstPath, key, srcFiles[key])
 
     def updateTaskStatus(self):
         """
