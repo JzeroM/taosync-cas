@@ -59,8 +59,8 @@ jobs:
     needs: [get-version, build-frontend]
     env:
       VERSION: ${{ needs.get-version.outputs.VERSION }}
-      # 修复这里：使用正确的函数调用语法
-      GHCR_IMAGE: ghcr.io/${{ lower(github.repository_owner) }}/${{ env.DOCKER_NAME }}
+      # 修复这里：使用 format 函数
+      GHCR_IMAGE: ${{ format('ghcr.io/{0}/{1}', github.repository_owner, env.DOCKER_NAME) }}
       PUSH_TO_DOCKERHUB: ${{ needs.get-version.outputs.PUSH_TO_DOCKERHUB }}
     steps:
     - uses: docker/setup-qemu-action@v3
