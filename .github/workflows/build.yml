@@ -7,8 +7,8 @@ on:
 
 env:
   APP_NAME: taoSync
-  DOCKER_USER: dr34m
-  DOCKER_NAME: tao-sync
+  DOCKER_USER: miuior
+  DOCKER_NAME: taosync-cas
 
 jobs:
   get-version:
