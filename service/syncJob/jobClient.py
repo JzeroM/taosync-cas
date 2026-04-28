@@ -430,41 +430,43 @@ class JobTask:
             raise e
 
     def syncWithHave(self, srcPath, dstPath, spec, srcRootPath, dstRootPath, firstDst):
+        """
+        扫描并同步-目标目录存在目录（意味着要继续扫描目标目录）
+        修改逻辑：如果找到同前缀文件，一律跳过同步
+        """
         if self.breakFlag:
             return
         try:
             srcFiles = self.listDir(srcPath, firstDst, spec, srcRootPath)
             dstFiles = self.listDir(dstPath, firstDst, spec, dstRootPath, False)
         except Exception:
+            # 已在listDir做出日志打印等操作，此处啥都不用做
             return
         
-        # ****************** 【正确构建目标端文件名前缀集合】******************
-        # dst_key 是相对当前目录的路径
+        # 构建目标端文件名前缀集合
         dst_filename_prefixes = set()
-        
         for dst_key in dstFiles.keys():
             if not dst_key.endswith('/'):  # 只处理文件
-                # dst_key 可能是 "file.mp4" 或 "subdir/file.mp4"
-                # 我们需要文件名，不包含路径
-                filename = dst_key.split('/')[-1]  # 获取最后的文件名
-                
-                # 提取文件名前缀（去掉扩展名）
+                # 获取文件名（去掉路径）
+                filename = dst_key.split('/')[-1]
                 if '.' in filename:
-                    filename_prefix = filename.rsplit('.', 1)[0]
+                    filename_prefix = filename.rsplit('.', 1)[0]  # 提取文件名前缀
                 else:
                     filename_prefix = filename
-                
                 dst_filename_prefixes.add(filename_prefix)
-        # ********************************************************************
-
+        
         for key in srcFiles.keys():
+            # 如果是文件
             if not key.endswith('/'):
-                # ... [视频文件过滤逻辑不变] ...
+                # 视频文件过滤
+                video_extensions = ('.mp4', '.mkv', '.avi', '.mov', '.flv', '.wmv', '.webm')
+                is_video_file = any(key.lower().endswith(ext) for ext in video_extensions)
                 
-                # 获取源文件的文件名（不包含路径）
+                if not is_video_file:
+                    continue
+                
+                # 获取源文件名前缀
                 src_filename = key.split('/')[-1] if '/' in key else key
-                
-                # 提取源文件名前缀
                 if '.' in src_filename:
                     src_filename_prefix = src_filename.rsplit('.', 1)[0]
                 else:
@@ -472,22 +474,35 @@ class JobTask:
                 
                 # 核心判断：同一目录下是否有同名前缀的文件
                 if src_filename_prefix in dst_filename_prefixes:
+                    # 找到同前缀文件，跳过同步
                     logger = logging.getLogger()
                     logger.info(f"跳过 {src_filename}，同目录存在前缀 {src_filename_prefix} 的文件")
                     continue
                 else:
-                    # ********** 【不跳过就直接执行同步】**********
+                    # 没有同前缀文件，执行同步
                     logger.info(f"同步 {src_filename}")
                     self.copyFile(srcPath, dstPath, key, srcFiles[key])
             
+            # 如果是目录
             else:
-                # 目录处理逻辑保持不变
+                # 目标目录没有这个目录
                 if key not in dstFiles:
                     self.syncWithOutHave(srcPath + key, dstPath + key, spec, srcRootPath, dstRootPath, firstDst)
+                # 目标目录有这个目录，继续递归
                 else:
                     self.syncWithHave(srcPath + key, dstPath + key, spec, srcRootPath, dstRootPath, firstDst)
+        
+        # 保持原作者的全同步模式删除逻辑
+        if self.job['method'] == 1:
+            for dstKey in dstFiles.keys():
+                if dstKey not in srcFiles:
+                    self.delFile(dstPath, dstKey, dstFiles[dstKey])
                 
     def syncWithOutHave(self, srcPath, dstPath, spec, srcRootPath, dstRootPath, firstDst):
+        """
+        扫描并同步-目标目录为空
+        修改逻辑：如果找到同前缀文件，一律跳过同步
+        """
         if self.breakFlag:
             return
         
@@ -509,10 +524,10 @@ class JobTask:
         try:
             srcFiles = self.listDir(srcPath, firstDst, spec, srcRootPath)
         except Exception:
+            # 已在listDir做出日志打印等操作，此处啥都不用做
             return
         
-        # ************** 【关键修改：创建目录后立即获取目标端文件列表】**************
-        # 即使目录刚创建，也要检查是否已有文件（如 .cas 文件）
+        # 3. 即使目录刚创建，也要检查是否已有文件（如 .cas 文件）
         try:
             dstFiles = self.listDir(dstPath, firstDst, spec, dstRootPath, False)
         except Exception:
@@ -528,7 +543,6 @@ class JobTask:
                 else:
                     filename_prefix = filename
                 dst_filename_prefixes.add(filename_prefix)
-        # ***************************************************************
         
         for key in srcFiles.keys():
             if self.breakFlag:
@@ -538,7 +552,6 @@ class JobTask:
                 # 如果是目录，递归处理
                 self.syncWithOutHave(srcPath + key, dstPath + key, spec, srcRootPath, dstRootPath, firstDst)
             else:
-                # ************** 【应用相同的视频文件过滤和CAS检查】**************
                 # 视频文件过滤
                 video_extensions = ('.mp4', '.mkv', '.avi', '.mov', '.flv', '.wmv', '.webm')
                 is_video_file = any(key.lower().endswith(ext) for ext in video_extensions)
@@ -546,10 +559,8 @@ class JobTask:
                 if not is_video_file:
                     continue
                 
-                # 获取源文件名
+                # 获取源文件名前缀
                 src_filename = key.split('/')[-1] if '/' in key else key
-                
-                # 提取源文件名前缀
                 if '.' in src_filename:
                     src_filename_prefix = src_filename.rsplit('.', 1)[0]
                 else:
@@ -557,12 +568,13 @@ class JobTask:
                 
                 # CAS前缀匹配检查
                 if src_filename_prefix in dst_filename_prefixes:
+                    # 找到同前缀文件，跳过同步
                     logger = logging.getLogger()
-                    logger.info(f"syncWithOutHave: 跳过 {src_filename}，目标端已有同名前缀文件")
+                    logger.info(f"跳过 {src_filename}，目标端已有同名前缀文件")
                     continue
                 else:
-                    # ********** 【不跳过就直接执行同步】**********
-                    logger.info(f"syncWithOutHave: 同步 {src_filename}")
+                    # 没有同前缀文件，执行同步
+                    logger.info(f"同步 {src_filename}")
                     self.copyFile(srcPath, dstPath, key, srcFiles[key])
 
     def updateTaskStatus(self):
