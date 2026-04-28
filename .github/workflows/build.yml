@@ -131,13 +131,8 @@ jobs:
           context: .
           platforms: linux/amd64,linux/arm64,linux/arm/v7
           push: true
-          tags: |
-            # 关键修复：使用 lower() 函数确保用户名小写
-            ghcr.io/${{ lower(github.repository_owner) }}/${{ env.DOCKER_NAME }}:${{ env.VERSION }}
-            ghcr.io/${{ lower(github.repository_owner) }}/${{ env.DOCKER_NAME }}:latest
-          labels: |
-            org.opencontainers.image.version=${{ env.VERSION }}
-            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+          tags: ${{ env.DOCKER_USER }}/${{ env.DOCKER_NAME }}:${{ env.VERSION }},${{ env.DOCKER_USER }}/${{ env.DOCKER_NAME }}:latest,${{ github.repository_owner }}/${{ env.DOCKER_NAME }}:${{ env.VERSION }}
+          labels: org.opencontainers.image.version=${{ env.VERSION }},org.opencontainers.image.source=https://github.com/${{ github.repository }}
 
   build-source-packages:
     name: 构建源码包
@@ -287,7 +282,7 @@ EOF
           echo "" >> "changelog-$VERSION.md"
           echo "## Docker镜像" >> "changelog-$VERSION.md"
           echo "- Docker Hub: \`miuior/taosync-cas:$VERSION\`" >> "changelog-$VERSION.md"
-          echo "- GitHub Container Registry: \`ghcr.io/jzer0m/taosync-cas:$VERSION\`" >> "changelog-$VERSION.md"
+          echo "- GitHub Container Registry: \`${{ github.repository_owner }}/taosync-cas:$VERSION\`" >> "changelog-$VERSION.md"
       
       - name: 发布到GitHub
         uses: softprops/action-gh-release@v2
