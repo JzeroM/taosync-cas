@@ -79,9 +79,5 @@ RUN echo "验证前端文件结构：" && \
 # 暴露端口
 EXPOSE 8023
 
-# 健康检查
-HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-    CMD curl -f http://localhost:8023/health 2>/dev/null || python -c "import socket; s = socket.socket(); s.connect(('127.0.0.1', 8023))"
-
 # 启动命令
 CMD ["python", "main.py"]
