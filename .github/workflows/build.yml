@@ -164,18 +164,17 @@ jobs:
           cp -r frontend/dist/* "taosync-$VERSION/frontend/dist/"
           
           cat > "taosync-$VERSION/start.sh" << 'EOF'
-#!/bin/bash
-cd "$(dirname "$0")"
-python3 -m venv venv
-source venv/bin/activate
-pip install -r requirements.txt
-python main.py
-EOF
+          #!/bin/bash
+          cd "$(dirname "$0")"
+          python3 -m venv venv
+          source venv/bin/activate
+          pip install -r requirements.txt
+          python main.py
+          EOF
           
           chmod +x "taosync-$VERSION/start.sh"
-          
           tar czf "taosync-$VERSION-source.tar.gz" "taosync-$VERSION/"
-      
+          
       - name: 上传源码包
         uses: actions/upload-artifact@v4
         with:
