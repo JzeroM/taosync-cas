@@ -1,202 +1,322 @@
+TaoSync-CAS
+
 <div align="center">
-  <a href=""><img width="200px" alt="logo" src="frontend/public/logo-200-64.png"/></a>
-  <p><em>TaoSync是一个适用于OpenList/AList v3+的自动化同步工具。</em></p>
-  <div>
-    <a href="https://github.com/dr34m-cn/taosync/blob/main/LICENSE">
-      <img src="https://img.shields.io/github/license/dr34m-cn/taosync" alt="License" />
-    </a>
-    <a href="https://github.com/dr34m-cn/taosync/actions/workflows/build.yml">
-      <img src="https://img.shields.io/github/actions/workflow/status/dr34m-cn/taosync/build.yml?branch=main" alt="Build status" />
-    </a>
-    <a href="https://www.python.org/">
-      <img src="https://img.shields.io/badge/backend-python-326c9c.svg" alt="Python" />
-    </a>
-    <a href="https://vuejs.org/">
-      <img src="https://img.shields.io/badge/frontend-vue-42b883.svg" alt="Vue" />
-    </a>
-    <a href="https://github.com/dr34m-cn/taosync/releases">
-      <img src="https://img.shields.io/github/release/dr34m-cn/taosync" alt="latest version" />
-    </a>
-    <a href="https://github.com/dr34m-cn/taosync/releases">
-      <img src="https://img.shields.io/github/downloads/dr34m-cn/taosync/total?color=%239F7AEA&logo=github" alt="Downloads" />
-    </a>
-    <a href="https://hub.docker.com/r/dr34m/tao-sync">
-      <img src="https://img.shields.io/docker/pulls/dr34m/tao-sync?color=%2348BB78&logo=docker&label=pulls" alt="DockerHub" />
-    </a>
-  </div>
+
+<a href=""><img width="200px" alt="logo" src="frontend/public/logo-200-64.png"/></a>
+
+TaoSync-CAS 是一个魔改自 TaoSync 的自动化同步工具，专门配合魔改的OpenList实现CAS文件自动化同步。
+
+<div>
+
+<a href="https://github.com/JzeroM/taosync-cas/blob/main/LICENSE
+">
+
+<img src="https://img.shields.io/github/license/JzeroM/taosync-cas
+" alt="License" />
+
+</a>
+
+<a href="https://github.com/JzeroM/taosync-cas/actions/workflows/build.yml
+">
+
+<img src="https://github.com/actions/workflow/status/JzeroM/taosync-cas/build.yml?branch=main
+" alt="Build status" />
+
+</a>
+
+<a href="https://www.python.org/
+">
+
+<img src="https://img.shields.io/badge/backend-python-326c9c.svg
+" alt="Python" />
+
+</a>
+
+<a href="https://vuejs.org/
+">
+
+<img src="https://img.shields.io/badge/frontend-vue-42b883.svg
+" alt="Vue" />
+
+</a>
+
+<a href="https://github.com/JzeroM/taosync-cas/releases
+">
+
+<img src="https://img.shields.io/github/release/JzeroM/taosync-cas
+" alt="latest version" />
+
+</a>
+
+<a href="https://github.com/JzeroM/taosync-cas/releases
+">
+
+<img src="https://img.shields.io/github/downloads/JzeroM/taosync-cas/total?color=%239F7AEA&logo=github
+" alt="Downloads" />
+
+</a>
+
+<a href="https://hub.docker.com/r/miuior/taosync-cas
+">
+
+<img src="https://img.shields.io/docker/pulls/miuior/taosync-cas?color=%2348BB78&logo=docker&label=pulls
+" alt="DockerHub" />
+
+</a>
+
 </div>
----
-本程序魔改自`taoSync`
-目的在于配合魔改的openlist利用监控新增同步，实现自动化搬运其他网盘资源到天翼云盘，生成cas文件后，仅保留cas文件，删除同步过来的原视频文件，解决因删除原视频文件而导致重复同步的问题，
-主逻辑在于只比对文件扩展名前面的文件名
-完整前缀有同名的一律跳过不再重复去同步
 
-**如果好用，请Star！非常感谢！** 
-[GitHub](https://github.com/JzeroM/taosync-cas) 
-[DockerHub(https://hub.docker.com/r/miuior/taosync-cas)
+</div>
 
-<details>
+✨ 项目特色
 
-<summary>点击展开截图</summary>
+TaoSync-CAS​ 是在原版 TaoSync 基础上深度魔改的版本，专门设计用于配合魔改的OpenList，实现自动化的视频文件同步 + CAS文件生成工作流。
 
-由于更新频繁，截图仅供参考，以实际为准
+🎯 核心功能
 
-#### 作业详情
+智能前缀匹配同步：只比对文件扩展名前面的文件名，完整前缀有同名的一律跳过不再重复同步
 
-![任务列表](README/作业详情.jpg)
+CAS文件自动处理：配合魔改的OpenList，同步视频文件到天翼云盘后自动生成.cas文件
 
-#### 引擎管理
+无重复同步：解决因删除原视频文件而导致重复同步的问题
 
-![引擎列表](README/引擎列表.png)
+自动化搬运：实现从其他网盘资源到天翼云盘的自动化搬运流程
 
-#### 引擎编辑
+🎯 相关项目
+1. TaoSync-CAS (本项目)
 
-![引擎编辑](README/引擎编辑.png)
+地址: https://github.com/JzeroM/taosync-cas
 
-#### 新建作业
+功能: 基于文件名前缀匹配的智能同步工具
 
-![新建作业](README/新建作业.jpg)
+2. OpenList-CAS (配套项目)
 
-#### 作业列表
+地址: https://github.com/GitYuA/OpenList-CAS
 
-![作业列表](README/作业列表.png)
+功能: 视频文件到CAS文件的自动化转换工具
 
-#### 任务详情
+🔄 协同工作流程
+TaoSync-CAS → 同步视频文件 → OpenList-CAS → 生成.cas文件 → TaoSync-CAS (跳过已处理文件)
+🚀 快速开始
+🐳 Docker 部署
 
-![任务详情](README/任务详情.png)
+TaoSync-CAS 提供两种镜像源，你可以根据需要选择：
 
-#### 通知配置
-
-![任务详情](README/通知配置.jpg)
-
-</details>
-
-## 须知
-
-> [!IMPORTANT]
-> 使用本工具前你必须了解并且会使用魔改的[OpenList]，本工具没有集成`OpenList`，你需要额外启动`OpenList`
-
-## 特性
-
-* 开源免费，接受任意审查，几乎支持所有常用平台
-  * windows-amd64
-  * windows-arm64
-  * darwin-amd64
-  * darwin-arm64
-  * linux-amd64
-  * linux-arm64
-  * linux-386
-  * linux-arm-v6
-  * linux-arm-v7
-  * linux-s390x
-  * 
-* 支持Docker，下载即用
-* 干净卸载，不用的时候删掉即可，无任何残留或依赖，不影响系统里其他程序
-* 密码加密不可逆，永远不会泄露您的密码，敏感信息均被加密，支持重置密码
-* 完全离线运行（仅连接AList），永不上传用户隐私
-* 完善的错误处理，稳定可靠，逻辑自洽；可能出错，但永不崩溃（我猜的）
-* 完善的日志，所有错误都会被记录
-* 引擎管理，可以自由增删改查`OpenList/AList`
-* 作业管理，可以新增/删除/启用/禁用/编辑/手动执行作业
-* 支持排除项规则，可以排除指定目录或文件不同步
-* 仅新增、全同步、移动三种模式
-* 定时同步支持间隔、`cron`、手动调用
-* 同步进度、总体进度、同步速度、实时同步文件、预估时间等实时可视化查看
-* 存储可控，合理配置任务记录与日志保留天数，可以控制本程序所占用存储在可控范围内
-* 支持钉钉群机器人或server酱通知，可在任务成功或失败后发送通知
-
-## 使用方法
-
-### 先启动
-
-* 可执行程序
-
-前往[Release](https://github.com/dr34m-cn/taosync/releases)下载对应平台的可执行程序，直接执行
-
-> [!TIP]
-> 开机自启、守护进程等可以参考[OpenList的方式](https://docs.oplist.org/zh/guide/install/manual.html#%E5%AE%88%E6%8A%A4%E8%BF%9B%E7%A8%8B)，把其中的`openlist`改为`taoSync`；注意，本程序**不需要`server`参数**
-
-* docker
-
+方案一：使用 Docker Hub 镜像 (推荐)
 ```sh
-docker run -d --restart=always -p 8023:8023 -v /opt/data:/app/data --name=taoSync dr34m/tao-sync:latest
+docker run -d \
+  --restart=always \
+  -p 8020:8023 \
+  -v /path/to/data:/app/data \
+  --name=taosync-cas \
+  miuior/taosync-cas:v1.1.1
+```  
+方案二：使用 GitHub Container Registry 镜像
+```sh
+docker run -d \
+  --restart=always \
+  -p 8020:8023 \
+  -v /path/to/data:/app/data \
+  --name=taosync-cas \
+  ghcr.io/jzerom/taosync-cas:latest
 ```
+🐳 Docker Compose 部署
+方案一：使用 Docker Compose 配合 Docker Hub
 
-把其中`/opt/data`替换为你实际的目录
+创建 docker-compose.yml文件：
+```sh
+yaml
+version: '3.8'
 
-在绿联NAS中使用可以参考这里[如何在绿联NAS中使用TaoSync同步我的文件到各个网盘](https://dr34m.cn/2024/07/newpost-57/)，在其他支持Docker的NAS中使用大同小异
-
-### 再使用
-
-访问`http://127.0.0.1:8023`
-
-如果你没有修改，默认账号为`admin`，密码请到日志中查看输出，登录后请立即前往系统设置修改密码
-
-> [!NOTE]
-> 如果没有显示这个日志，可以到同级目录的`data/log/sys_xxx.log`文件查看，通常在第一行
-
-进入系统后先到`引擎管理`菜单创建引擎，然后前往`作业管理`创建同步作业
-
-## 配置项
-
-<details>
-<summary>点击展开配置项</summary>
-
-配置优先级：`data/config.ini`>`环境变量`>`默认值`；前一个存在，则后边都将被**忽略**。修改配置需重启程序或Docker。
-
-`data/config.ini`文件示例（如该文件存在，则**优先级最高**）
-
-```ini
-[tao]
-# 运行端口号
-port=8023
-# 登录有效期，单位天
-expires=2
-# 日志等级：0-DEBUG，1-INFO，2-WARNING，3-ERROR，4-CRITICAL；数值越大，产生的日志越少，推荐1或2
-log_level=1
-# 控制台日志等级：适用于v0.2.3及之后版本，与上同
-console_level=2
-# 系统日志保留天数，该天数之前的日志会自动清理，单位天，0表示不自动清理
-log_save=7
-# 任务记录保留天数，该天数之前的记录会自动清理，单位天，0表示不自动清理
-task_save=0
-# 任务执行超时时间，单位小时。一定要设置长一点，以免要备份的东西太多
-task_timeout=72
+services:
+  taosync:
+    image: miuior/taosync-cas:v1.1.1
+    container_name: taosync_cas
+    restart: always
+    ports:
+      - "8023:8023"
+    volumes:
+      - ./data:/app/data
+    environment:
+      - TZ=Asia/Shanghai
 ```
+方案二：使用 Docker Compose 配合 GitHub Container Registry
+```sh
+version: '3.8'
 
-上边的文件默认不存在，如需要，您可以手动在程序同级目录的`data`目录下创建`config.ini`，并填入上边的内容。注意，文件应使用`UTF-8`编码
+services:
+  taosync:
+    image: ghcr.io/jzerom/taosync-cas:latest
+    container_name: taosync_cas
+    restart: always
+    ports:
+      - "8023:8023"
+    volumes:
+      - ./data:/app/data
+    environment:
+      - TZ=Asia/Shanghai
+```
+启动和停止
+bash
+# 启动服务
+docker-compose up -d
 
-| config.ini    | Docker环境变量    | 描述                                                         | 默认值           |
-| ------------- | ----------------- | ------------------------------------------------------------ |---------------|
-| port          | TAO_PORT          | 运行端口号                                                   | 8023          |
-| expires       | TAO_EXPIRES       | 登录有效期，单位天                                           | 2             |
-| log_level     | TAO_LOG_LEVEL     | 日志等级：0-DEBUG，1-INFO，2-WARNING，3-ERROR，4-CRITICAL；数值越大，产生的日志越少，推荐1或2 | 1             |
-| console_level | TAO_CONSOLE_LEVEL | 控制台日志等级：适用于v0.2.3及之后版本；与上同               | 2             |
-| log_save      | TAO_LOG_SAVE      | 系统日志保留天数，该天数之前的日志会自动清理，单位天，0表示不自动清理 | 7             |
-| task_save     | TAO_TASK_SAVE     | 任务记录保留天数，该天数之前的记录会自动清理，单位天，0表示不自动清理 | 0             |
-| task_timeout  | TAO_TASK_TIMEOUT  | 任务执行超时时间，单位小时。一定要设置长一点，以免要备份的东西太多 | 72            |
-| -             | TZ                | 时区                                                         | Asia/Shanghai |
+# 查看日志
+docker-compose logs -f
+
+# 停止服务
+docker-compose down
+
+🔐 获取初始密码
+bash
+# 查看容器日志获取随机生成的密码
+```sh
+docker logs taosync_cas | grep "Password for admin"
+```
+# 或查看挂载目录的日志文件
+```sh
+cat ./data/log/sys_*.log | grep "Password for admin"
+```
+默认用户名: admin
+
+初始密码: 随机生成，查看日志获取
+
+登录地址: http://localhost:8023
+
+⚠️ 重要：登录后请立即前往系统设置修改密码！
+
+⚙️ 同步模式
+
+TaoSync-CAS 支持三种同步模式：
+
+模式
+
+	
+
+说明
+
+	
+
+适用场景
+
+
+
+
+仅新增 (mode=0)
+
+	
+
+只同步新增文件，不删除目标端文件
+
+	
+
+CAS文件生成工作流
+
+
+
+
+全同步 (mode=1)
+
+	
+
+同步新增文件，并删除目标端多余文件
+
+	
+
+完全同步，保持两端一致
+
+
+
+
+移动模式 (mode=2)
+
+	
+
+同步文件后删除源文件
+
+	
+
+文件迁移场景
+
+作业详情
+
+README/作业详情.jpg
+
+引擎管理
+
+README/引擎列表.png
+
+新建作业
+
+README/新建作业.jpg
+
+作业列表
+
+README/作业列表.png
+
+任务详情
+
+README/任务详情.png
+
+通知配置
+
+README/通知配置.jpg
 
 </details>
 
-## 研发状态
+⚠️ 重要说明
 
-历史记录在[这里](https://github.com/dr34m-cn/taosync/tree/main/doc/changelog)；
+[!IMPORTANT]
 
-如想体验研发中的版本(可能存在明显错误或严重bug，不建议小白尝试)，可以尝试到[DockerHub](https://hub.docker.com/r/dr34m/tao-sync)或[Release](https://github.com/dr34m-cn/taosync/releases)找最新的含`dev`或`pre`的tag，例如`v0.1.0-dev-build0`
+使用本工具前你必须了解并且会使用魔改的OpenList，本工具没有集成魔改OpenList，你需要额外启动魔改OpenList服务。
 
-### 规划中（随时改变or因太难不做了，概不负责）
+🔄 开发状态
 
-* windows版本优化（开机自启，隐藏页面，启动停止等）[#13](https://github.com/dr34m-cn/taosync/issues/13)
-* OpenList支持加密同步 [#18](https://github.com/dr34m-cn/taosync/issues/18)
-* 移动端适配（可能顺便开发个app？）
-* 支持本地引擎（不基于`OpenList`）
-* 本地引擎支持加密同步
-* 保留历史N个版本（N可自定义，可无限）
-* 配置导入导出
-* 多语言支持
-* linux一键安装、更新与卸载脚本
+开发状态: 持续维护
 
-## Star随时间
+原项目: 基于 dr34m-cn/taosync
+魔改
 
-[![Stargazers over time](https://starchart.cc/dr34m-cn/taosync.svg?variant=adaptive)](https://starchart.cc/dr34m-cn/taosync)
+许可证: AGPL-3.0
+
+📈 Star趋势
+
+https://starchart.cc/JzeroM/taosync-cas.svg?variant=adaptive
+
+📄 许可证
+
+本项目采用 AGPL-3.0 许可证。详见 LICENSE
+文件。
+
+🙏 致谢
+
+感谢原项目 dr34m-cn/taosync
+提供的基础框架
+
+感谢魔改OpenList项目的开发者
+
+感谢所有贡献者和使用者
+
+🤝 贡献
+
+欢迎提交 Issue 和 Pull Request！
+
+Fork 本仓库
+
+创建功能分支 (git checkout -b feature/AmazingFeature)
+
+提交更改 (git commit -m 'Add some AmazingFeature')
+
+推送到分支 (git push origin feature/AmazingFeature)
+
+开启 Pull Request
+
+📧 联系
+
+GitHub: JzeroM
+
+项目地址: taosync-cas
+
+Docker Hub: miuior/taosync-cas
+
+GitHub Container Registry: ghcr.io/jzerom/taosync-cas
