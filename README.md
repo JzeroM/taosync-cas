@@ -6,66 +6,6 @@ TaoSync-CAS
 
 TaoSync-CAS 是一个魔改自 TaoSync 的自动化同步工具，专门配合魔改的OpenList实现CAS文件自动化同步。
 
-<div>
-
-<a href="https://github.com/JzeroM/taosync-cas/blob/main/LICENSE
-">
-
-<img src="https://img.shields.io/github/license/JzeroM/taosync-cas
-" alt="License" />
-
-</a>
-
-<a href="https://github.com/JzeroM/taosync-cas/actions/workflows/build.yml
-">
-
-<img src="https://github.com/actions/workflow/status/JzeroM/taosync-cas/build.yml?branch=main
-" alt="Build status" />
-
-</a>
-
-<a href="https://www.python.org/
-">
-
-<img src="https://img.shields.io/badge/backend-python-326c9c.svg
-" alt="Python" />
-
-</a>
-
-<a href="https://vuejs.org/
-">
-
-<img src="https://img.shields.io/badge/frontend-vue-42b883.svg
-" alt="Vue" />
-
-</a>
-
-<a href="https://github.com/JzeroM/taosync-cas/releases
-">
-
-<img src="https://img.shields.io/github/release/JzeroM/taosync-cas
-" alt="latest version" />
-
-</a>
-
-<a href="https://github.com/JzeroM/taosync-cas/releases
-">
-
-<img src="https://img.shields.io/github/downloads/JzeroM/taosync-cas/total?color=%239F7AEA&logo=github
-" alt="Downloads" />
-
-</a>
-
-<a href="https://hub.docker.com/r/miuior/taosync-cas
-">
-
-<img src="https://img.shields.io/docker/pulls/miuior/taosync-cas?color=%2348BB78&logo=docker&label=pulls
-" alt="DockerHub" />
-
-</a>
-
-</div>
-
 </div>
 
 ✨ 项目特色
