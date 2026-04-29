@@ -49,7 +49,7 @@ docker run -d \
   -p 8023:8023 \
   -v /path/to/data:/app/data \
   --name=taosync-cas \
-  miuior/taosync-cas:v1.1.1
+  miuior/taosync-cas:latest
 ```
  
 方案二：使用 GitHub Container Registry 镜像
@@ -73,7 +73,7 @@ version: '3.8'
 
 services:
   taosync:
-    image: miuior/taosync-cas:v1.1.1
+    image: miuior/taosync-cas:latest
     container_name: taosync_cas
     restart: always
     ports:
