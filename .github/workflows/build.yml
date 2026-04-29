@@ -85,19 +85,9 @@ jobs:
     steps:
       - name: 设置QEMU
         uses: docker/setup-qemu-action@v3
-        with:
-          platforms: |
-            arm64
-            arm
-            ppc64le
-            s390x
       
       - name: 设置BuildX
         uses: docker/setup-buildx-action@v3
-        with:
-          driver-opts: |
-            image=moby/buildkit:master
-            network=host
       
       - name: 登录Docker Hub
         if: env.PUSH_TO_DOCKERHUB == 'true'
@@ -124,23 +114,37 @@ jobs:
       
       - name: 创建前端符号链接
         run: |
+          # 方案三：创建符号链接
+          echo "当前目录结构:"
+          ls -la
+          echo "创建符号链接 front -> frontend/dist"
           ln -snf $PWD/frontend/dist $PWD/front
+          echo "符号链接创建结果:"
+          ls -la front/
+          echo "验证前端文件:"
+          ls -la frontend/dist/
       
-      - name: 构建和推送Docker镜像
+      - name: 推送到Docker Hub
+        if: env.PUSH_TO_DOCKERHUB == 'true'
         uses: docker/build-push-action@v6
         with:
           context: .
-          platforms: |
-            linux/amd64
-            linux/arm64
-            linux/arm/v7
-            linux/386
-            linux/ppc64le
-            linux/s390x
+          platforms: linux/amd64,linux/arm64,linux/arm/v7
           push: true
           tags: |
             ${{ env.DOCKER_USER }}/${{ env.DOCKER_NAME }}:${{ env.VERSION }}
             ${{ env.DOCKER_USER }}/${{ env.DOCKER_NAME }}:latest
+          labels: |
+            org.opencontainers.image.version=${{ env.VERSION }}
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+      
+      - name: 推送到GHCR
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64,linux/arm/v7
+          push: true
+          tags: |
             ghcr.io/${{ env.GHCR_USER_LOWER }}/${{ env.DOCKER_NAME }}:${{ env.VERSION }}
             ghcr.io/${{ env.GHCR_USER_LOWER }}/${{ env.DOCKER_NAME }}:latest
           labels: |
@@ -175,6 +179,7 @@ jobs:
           mkdir -p "taosync-$VERSION/frontend/dist"
           cp -r frontend/dist/* "taosync-$VERSION/frontend/dist/"
           
+          # 在源码包中也创建符号链接
           ln -snf frontend/dist "taosync-$VERSION/front"
           
           cat > "taosync-$VERSION/start.sh" << 'EOF'
