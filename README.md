@@ -4,7 +4,7 @@ TaoSync-CAS
 
 <a href=""><img width="200px" alt="logo" src="frontend/public/logo-200-64.png"/></a>
 
-TaoSync-CAS 是一个魔改自 TaoSync 的自动化同步工具，专门配合魔改的OpenList实现CAS文件自动化同步。
+TaoSync-CAS 是一个魔改自 TaoSync 的自动化同步工具
 
 </div>
 
