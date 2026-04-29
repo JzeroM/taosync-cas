@@ -123,7 +123,7 @@ cat ./data/log/sys_*.log | grep "Password for admin"
 
 [!IMPORTANT]
 
-使用本工具前你必须了解并且会使用魔改的OpenList，本工具没有集成魔改OpenList，你需要额外启动魔改OpenList服务。
+使用本工具前你必须了解并且会使用魔改的OpenList，本工具没有集成魔改OpenList，你需要额外启动魔改OpenList服务，并且目前只支持仅新增同步模式。
 
 🔄 开发状态
 
