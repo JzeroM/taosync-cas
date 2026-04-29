@@ -432,14 +432,7 @@ class JobTask:
     def syncWithHave(self, srcPath, dstPath, spec, srcRootPath, dstRootPath, firstDst):
         """
         扫描并同步-目标目录存在目录
-        修改逻辑：只比较目标目录下的文件前缀，不比较文件大小
-        :param srcPath: 来源路径，以/结尾
-        :param dstPath: 目标路径，以/结尾
-        :param spec: 排除项规则
-        :param srcRootPath: 来源目录根目录，以/结尾
-        :param dstRootPath: 目标目录根目录，以/结尾
-        :param firstDst: 是否是第一个目标目录
-        :return:
+        修改：源文件使用完整文件名，目标文件只移除最后的扩展名
         """
         if self.breakFlag:
             return
@@ -453,46 +446,56 @@ class JobTask:
             logger.error(f"获取目录列表失败: {e}")
             return
         
-        # 构建目标端文件名前缀集合
+        # 构建目标端文件名前缀集合（只移除最后的扩展名）
         dst_filename_prefixes = set()
+        prefix_debug_info = []
+        
         for dst_key in dstFiles.keys():
-            if not dst_key.endswith('/'):  # 只处理文件
+            if not dst_key.endswith('/'):
+                # 获取目标文件名（去掉路径）
                 filename = dst_key.split('/')[-1]
+                
+                # 只移除最后的扩展名
                 if '.' in filename:
-                    filename_prefix = filename.rsplit('.', 1)[0]  # 提取文件名前缀
+                    filename_prefix = filename.rsplit('.', 1)[0]  # 只移除最后一个点后的内容
                 else:
                     filename_prefix = filename
+                
                 dst_filename_prefixes.add(filename_prefix)
+                prefix_debug_info.append(f"目标文件: {dst_key} -> 提取前缀: '{filename_prefix}'")
         
-        logger.debug(f"目标目录文件前缀集合: {dst_filename_prefixes}")
+        # 调试信息
+        logger.info(f"[CAS调试] 目标目录 {dstPath} 前缀集合构建:")
+        for info in prefix_debug_info:
+            logger.info(f"[CAS调试]   {info}")
+        logger.info(f"[CAS调试] 最终目标前缀集合: {dst_filename_prefixes}")
         
         for key in srcFiles.keys():
             # 如果是文件
             if not key.endswith('/'):
-                # 1. 视频文件过滤
+                # 视频文件过滤
                 video_extensions = ('.mp4', '.mkv', '.avi', '.mov', '.flv', '.wmv', '.webm')
                 is_video_file = any(key.lower().endswith(ext) for ext in video_extensions)
                 
                 if not is_video_file:
                     continue
                 
-                # 2. 获取源文件名前缀
-                src_filename = key.split('/')[-1] if '/' in key else key
-                if '.' in src_filename:
-                    src_filename_prefix = src_filename.rsplit('.', 1)[0]
-                else:
-                    src_filename_prefix = src_filename
+                # 获取源文件的完整文件名（带扩展名）
+                src_full_filename = key.split('/')[-1] if '/' in key else key
                 
-                logger.debug(f"检查文件: {src_filename}, 前缀={src_filename_prefix}")
+                # 调试信息
+                logger.info(f"[CAS调试] 检查源文件: {src_full_filename}")
+                logger.info(f"[CAS调试] 比较: 源完整文件名='{src_full_filename}' vs 目标前缀集合={dst_filename_prefixes}")
+                logger.info(f"[CAS调试] 是否在集合中: {src_full_filename in dst_filename_prefixes}")
                 
-                # 3. CAS检查：只比较前缀
-                if src_filename_prefix in dst_filename_prefixes:
-                    # 找到同前缀文件，跳过同步
-                    logger.info(f"✅ 跳过 {src_filename}，同目录存在前缀 {src_filename_prefix} 的文件")
+                # CAS检查：源文件完整文件名 是否在 目标文件前缀集合中
+                if src_full_filename in dst_filename_prefixes:
+                    # 找到匹配，跳过同步
+                    logger.info(f"✅ 跳过 {src_full_filename}，目标目录存在相同前缀文件")
                     continue
                 else:
-                    # 没有同前缀文件，执行同步
-                    logger.info(f"🔄 同步 {src_filename} (前缀: {src_filename_prefix})")
+                    # 没有匹配，执行同步
+                    logger.info(f"🔄 同步 {src_full_filename}")
                     self.copyFile(srcPath, dstPath, key, srcFiles[key])
             
             # 如果是目录
@@ -504,14 +507,13 @@ class JobTask:
                     self.syncWithOutHave(srcPath + key, dstPath + key, spec, srcRootPath, dstRootPath, firstDst)
                 # 目标目录有这个目录，继续递归
                 else:
-                    # 递归调用
                     self.syncWithHave(srcPath + key, dstPath + key, spec, srcRootPath, dstRootPath, firstDst)
         
         # 保持原作者的全同步模式删除逻辑
         if self.job['method'] == 1:
             for dstKey in dstFiles.keys():
                 if dstKey not in srcFiles:
-                    self.delFile(dstPath, dstKey, dstFiles[dstKey])
+                    self.delFile(dstPath, dstKey, dstFiles[dstKey])    
                 
     def syncWithOutHave(self, srcPath, dstPath, spec, srcRootPath, dstRootPath, firstDst):
         """
