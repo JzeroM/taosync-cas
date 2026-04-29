@@ -131,24 +131,6 @@ cat ./data/log/sys_*.log | grep "Password for admin"
 
 2.使用本工具前你必须了解并且会使用魔改的OpenList，本工具没有集成魔改OpenList，你需要额外启动魔改OpenList服务，并且目前只支持仅新增同步模式。
 
-🔄 开发状态
-
-开发状态: 持续维护
-
-原项目: 基于 dr34m-cn/taosync
-魔改
-
-许可证: AGPL-3.0
-
-📈 Star趋势
-
-https://starchart.cc/JzeroM/taosync-cas.svg?variant=adaptive
-
-📄 许可证
-
-本项目采用 AGPL-3.0 许可证。详见 LICENSE
-文件。
-
 🙏 致谢
 
 感谢原项目 dr34m-cn/taosync
