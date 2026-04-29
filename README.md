@@ -97,7 +97,7 @@ services:
       - TZ=Asia/Shanghai
 ```
 启动和停止
-bash
+
 # 启动服务
 docker-compose up -d
 
@@ -108,7 +108,7 @@ docker-compose logs -f
 docker-compose down
 
 🔐 获取初始密码
-bash
+
 # 查看容器日志获取随机生成的密码
 ```sh
 docker logs taosync_cas | grep "Password for admin"
