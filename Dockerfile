@@ -22,7 +22,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 # 复制应用程序源代码
 COPY . .
 
-# 创建前端符号链接（方案三核心修复）
+# 创建前端符号链接
 RUN ln -snf /app/frontend/dist /app/front
 
 # 运行时阶段
