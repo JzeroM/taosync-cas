@@ -125,13 +125,11 @@ cat ./data/log/sys_*.log | grep "Password for admin"
 
 登录地址: http://localhost:8023
 
-⚠️ 重要：登录后请立即前往系统设置修改密码！
+⚠️ 重要说明：
 
-⚠️ 重要说明
+1.登录后请立即前往系统设置修改密码！
 
-[!IMPORTANT]
-
-使用本工具前你必须了解并且会使用魔改的OpenList，本工具没有集成魔改OpenList，你需要额外启动魔改OpenList服务，并且目前只支持仅新增同步模式。
+2.使用本工具前你必须了解并且会使用魔改的OpenList，本工具没有集成魔改OpenList，你需要额外启动魔改OpenList服务，并且目前只支持仅新增同步模式。
 
 🔄 开发状态
 
