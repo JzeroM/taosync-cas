@@ -46,7 +46,7 @@ TaoSync-CAS 提供两种镜像源，你可以根据需要选择：
 ```sh
 docker run -d \
   --restart=always \
-  -p 8020:8023 \
+  -p 8023:8023 \
   -v /path/to/data:/app/data \
   --name=taosync-cas \
   miuior/taosync-cas:v1.1.1
@@ -55,7 +55,7 @@ docker run -d \
 ```sh
 docker run -d \
   --restart=always \
-  -p 8020:8023 \
+  -p 8023:8023 \
   -v /path/to/data:/app/data \
   --name=taosync-cas \
   ghcr.io/jzerom/taosync-cas:latest
