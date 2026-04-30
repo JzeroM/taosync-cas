@@ -432,7 +432,7 @@ class JobTask:
     def syncWithHave(self, srcPath, dstPath, spec, srcRootPath, dstRootPath, firstDst):
         """
         扫描并同步-目标目录存在目录
-        修改：源文件使用完整文件名，目标文件只移除最后的扩展名
+        修改：新文件一律等待1分半（90秒）后再同步
         """
         if self.breakFlag:
             return
@@ -470,6 +470,13 @@ class JobTask:
             logger.info(f"[CAS调试]   {info}")
         logger.info(f"[CAS调试] 最终目标前缀集合: {dst_filename_prefixes}")
         
+        # 初始化新文件等待记录（在JobTask的__init__中需要添加）
+        if not hasattr(self, 'new_file_waiting_records'):
+            self.new_file_waiting_records = {}  # 格式: {完整文件路径: 发现时间戳}
+        
+        current_time = time.time()
+        wait_seconds = 90  # 固定等待1分半（90秒）
+        
         for key in srcFiles.keys():
             # 如果是文件
             if not key.endswith('/'):
@@ -482,8 +489,26 @@ class JobTask:
                 
                 # 获取源文件的完整文件名（带扩展名）
                 src_full_filename = key.split('/')[-1] if '/' in key else key
+                file_full_path = srcPath + key
                 
-                # 调试信息
+                # 检查是否是首次发现的新文件
+                if file_full_path not in self.new_file_waiting_records:
+                    # 新文件，记录发现时间
+                    self.new_file_waiting_records[file_full_path] = current_time
+                    logger.info(f"⏳ 新视频文件发现: {src_full_filename}，开始1分半等待（下次同步处理）")
+                    continue
+                
+                # 计算已等待时间
+                discovery_time = self.new_file_waiting_records[file_full_path]
+                time_elapsed = current_time - discovery_time
+                
+                # 如果等待时间不足1分半，跳过本次同步
+                if time_elapsed < wait_seconds:
+                    remaining = wait_seconds - time_elapsed
+                    logger.info(f"⏳ 等待1分半: {src_full_filename}，已等待 {int(time_elapsed)}秒，还需 {int(remaining)}秒")
+                    continue
+                
+                # 1分半等待结束，进行正常的CAS检查
                 logger.info(f"[CAS调试] 检查源文件: {src_full_filename}")
                 logger.info(f"[CAS调试] 比较: 源完整文件名='{src_full_filename}' vs 目标前缀集合={dst_filename_prefixes}")
                 logger.info(f"[CAS调试] 是否在集合中: {src_full_filename in dst_filename_prefixes}")
@@ -492,11 +517,17 @@ class JobTask:
                 if src_full_filename in dst_filename_prefixes:
                     # 找到匹配，跳过同步
                     logger.info(f"✅ 跳过 {src_full_filename}，目标目录存在相同前缀文件")
+                    # 从等待记录中移除
+                    if file_full_path in self.new_file_waiting_records:
+                        del self.new_file_waiting_records[file_full_path]
                     continue
                 else:
                     # 没有匹配，执行同步
-                    logger.info(f"🔄 同步 {src_full_filename}")
+                    logger.info(f"🔄 同步 {src_full_filename}（等待1分半后）")
                     self.copyFile(srcPath, dstPath, key, srcFiles[key])
+                    # 从等待记录中移除
+                    if file_full_path in self.new_file_waiting_records:
+                        del self.new_file_waiting_records[file_full_path]
             
             # 如果是目录
             else:
@@ -509,11 +540,14 @@ class JobTask:
                 else:
                     self.syncWithHave(srcPath + key, dstPath + key, spec, srcRootPath, dstRootPath, firstDst)
         
+        # 清理过时的等待记录（防止内存泄漏）
+        self.cleanup_old_waiting_records(current_time)
+        
         # 保持原作者的全同步模式删除逻辑
         if self.job['method'] == 1:
             for dstKey in dstFiles.keys():
                 if dstKey not in srcFiles:
-                    self.delFile(dstPath, dstKey, dstFiles[dstKey])    
+                    self.delFile(dstPath, dstKey, dstFiles[dstKey])
                 
     def syncWithOutHave(self, srcPath, dstPath, spec, srcRootPath, dstRootPath, firstDst):
         """
@@ -567,6 +601,23 @@ class JobTask:
                 # 不调用 copyFile
                 # 重要：不处理任何文件，只完成目录结构创建
         logger.info(f"🎯 目录 {dstPath} 创建完成，发现 {dir_count} 个子目录，{file_count} 个文件待下次同步")
+
+    def cleanup_old_waiting_records(self, current_time):
+        """清理过时的等待记录"""
+        if not hasattr(self, 'new_file_waiting_records'):
+            return
+        
+        # 清理超过4小时的记录
+        max_age = 4 * 60 * 60  # 4小时
+        
+        to_delete = []
+        for file_path, discovery_time in self.new_file_waiting_records.items():
+            if current_time - discovery_time > max_age:
+                to_delete.append(file_path)
+        
+        for file_path in to_delete:
+            del self.new_file_waiting_records[file_path]
+            logger.debug(f"清理过期等待记录: {file_path}") 
 
     def updateTaskStatus(self):
         """
