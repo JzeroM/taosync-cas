@@ -540,7 +540,7 @@ class JobTask:
                 else:
                     self.syncWithHave(srcPath + key, dstPath + key, spec, srcRootPath, dstRootPath, firstDst)
         
-        # 清理过时的等待记录（防止内存泄漏）
+        # 清理过时的等待记录，防止内存泄漏
         self.cleanup_old_waiting_records(current_time)
         
         # 保持原作者的全同步模式删除逻辑
