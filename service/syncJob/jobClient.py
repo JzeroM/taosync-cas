@@ -473,7 +473,7 @@ class JobTask:
             # 如果是文件
             if not key.endswith('/'):
                 # 视频文件过滤
-                video_extensions = ('.mp4', '.mkv', '.avi', '.mov', '.flv', '.wmv', '.webm', '.ts', '.m2ts', '.mts', '.iso')
+                video_extensions = ('.mp4', '.mkv', '.avi', '.mov', '.flv', '.wmv', '.webm', '.ts', '.m2ts', '.mts', '.iso', '.f4v')
                 is_video_file = any(key.lower().endswith(ext) for ext in video_extensions)
                 
                 if not is_video_file:
