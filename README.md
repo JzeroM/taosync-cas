@@ -10,7 +10,7 @@ TaoSync-CAS 是一个魔改自 TaoSync 的自动化同步工具
 
 ✨ 项目特色
 
-TaoSync-CAS​ 是在原版 TaoSync 基础上深度魔改的版本，专门设计用于配合魔改的OpenList，实现自动化搬运视频资源到天翼云盘且删除原文件仅保留CAS文件的工作流。
+TaoSync-CAS​ 是在原版 TaoSync 基础上魔改同步逻辑的版本，专门设计用于配合魔改的OpenList，实现自动化搬运视频资源到天翼云盘且删除原文件仅保留CAS文件的工作流。
 
 🎯 核心功能
 
