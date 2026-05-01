@@ -64,7 +64,7 @@ docker run -d \
 
 🐳 Docker Compose 部署
 
-方案一：使用 Docker Compose 配合 Docker Hub
+方案一：使用 Docker Hub 镜像 (推荐)
 
 创建 docker-compose.yml文件：
 ```sh
@@ -84,7 +84,7 @@ services:
       - TZ=Asia/Shanghai
 ```
 
-方案二：使用 Docker Compose 配合 GitHub Container Registry
+方案二：使用 GitHub Container Registry 镜像
 ```sh
 version: '3.8'
 
