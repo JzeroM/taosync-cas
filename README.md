@@ -68,7 +68,6 @@ docker run -d \
 
 创建 docker-compose.yml文件：
 ```sh
-yaml
 version: '3.8'
 
 services:
