@@ -204,7 +204,7 @@ jobs:
           path: dist/*.zip
 
   # ============================================================
-  # 5. Android（最稳保守写法）
+  # 5. Android（保守修复 + 强制 Java 8 + 详细日志）
   # ============================================================
   build-android:
     name: 构建Android
@@ -213,7 +213,7 @@ jobs:
     env:
       VERSION: ${{ needs.get-version.outputs.VERSION }}
     steps:
-      - name: 检出代码并下载前端
+      - name: 检出代码
         uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
@@ -230,24 +230,33 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: 安装依赖
+      - name: 安装系统依赖与 Java 8
         run: |
           sudo apt-get update -y
-          sudo apt-get install -y autoconf automake libtool zlib1g-dev libncurses5-dev libffi-dev libssl-dev openjdk-17-jdk git build-essential
-          pip install --upgrade pip
-          pip install buildozer python-for-android Cython
+          sudo apt-get install -y -qq autoconf automake libtool zlib1g-dev libncurses5-dev \
+            libffi-dev libssl-dev build-essential git zip unzip
+          sudo apt-get install -y -qq openjdk-8-jdk
+          echo "JAVA_HOME=/usr/lib/jvm/java-8-openjdk-amd64" >> $GITHUB_ENV
+          echo "PATH=/usr/lib/jvm/java-8-openjdk-amd64/bin:$PATH" >> $GITHUB_ENV
 
-      - name: 初始化并编译
+      - name: 安装 Python 依赖
+        run: |
+          pip install --upgrade pip
+          pip install buildozer==1.5.0 python-for-android==2024.01.21 Cython==0.29.34
+
+      - name: 注入版本并编译（开启 -vv 日志）
         run: |
           cp main_android.py main.py
-          sed -i "s/^version = .*/version = ${VERSION#v}/" buildozer.spec
-          buildozer -v android debug
+          ver_num="${VERSION#v}"
+          sed -i "s/^version = .*/version = $ver_num/" buildozer.spec
+          rm -rf .buildozer
+          buildozer -vv android debug
 
       - name: 收集产物
         if: always()
         run: |
           mkdir -p dist
-          find bin -name "*.apk" -exec cp {} dist/ \; || true
+          find bin -name "*.apk" -exec cp {} dist/ \; || echo "APK 未生成，请检查上方 -vv 日志"
 
       - uses: actions/upload-artifact@v4
         if: always()
