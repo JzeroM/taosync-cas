@@ -18,10 +18,6 @@ RUN pip install --no-cache-dir -r requirements.txt
 # 复制整个仓库代码
 COPY . .
 
-# 原版 main.py 运行时找 ./front
-# CI 里 web/dist 是真实产物，这里做软链，不动代码
-RUN ln -sfn /app/web/dist /app/front
-
 # 数据持久化目录
 RUN mkdir -p /app/data/logs /app/data/temp /app/data/config \
     && chmod -R 755 /app/data
