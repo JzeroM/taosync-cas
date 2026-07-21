@@ -6,6 +6,7 @@ import sys
 from tornado.web import Application, RequestHandler, StaticFileHandler
 
 from common.config import getConfig
+from common.LNG import G
 from controller import systemController, jobController, notifyController
 from service.system import onStart
 
@@ -22,6 +23,7 @@ def make_app():
         (r"/svr/user", systemController.User),
         (r"/svr/language", systemController.Language),
         (r"/svr/alist", jobController.Alist),
+        (r"/svr/storage", jobController.Storage),
         (r"/svr/job", jobController.Job),
         (r"/svr/notify", notifyController.Notify),
         (r"/", MainIndex),
@@ -34,7 +36,7 @@ async def main():
     app = make_app()
     logger = logging.getLogger()
     app.listen(server['port'])
-    successMsg = f"启动成功_/_Running at http://127.0.0.1:{server['port']}/"
+    successMsg = G('running_success').format(url=f"http://127.0.0.1:{server['port']}/")
     logger.critical(successMsg)
     await asyncio.Event().wait()
 
