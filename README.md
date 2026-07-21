@@ -1,5 +1,3 @@
-TaoSync-CAS
-
 <div align="center">
 
 TaoSync-CAS 是一个魔改自 TaoSync 的自动化同步工具
