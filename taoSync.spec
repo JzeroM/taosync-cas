@@ -1,12 +1,23 @@
 # -*- mode: python ; coding: utf-8 -*-
-
+import os
 
 a = Analysis(
     ['main.py'],
-    pathex=[],
+    pathex=['.'],               # 让 controller/service/mapper 都能被正确追踪
     binaries=[],
-    datas=[('dist/', 'front')],
-    hiddenimports=[],
+    # 你的前端在根目录构建，dist/ 映射成运行时的 front/
+    datas=[('dist', 'front')],
+    hiddenimports=[
+        'tornado',
+        'controller.systemController',
+        'controller.jobController',
+        'controller.notifyController',
+        'service.system',
+        'service.syncJob.jobClient',
+        'mapper.jobMapper',
+        'common.config',
+        'common.LNG',
+    ],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
@@ -14,26 +25,26 @@ a = Analysis(
     noarchive=False,
     optimize=0,
 )
+
 pyz = PYZ(a.pure)
 
 exe = EXE(
     pyz,
     a.scripts,
-    a.binaries,
+    a.binaries.to_pyz_data(),
+    a.zipfiles,
     a.datas,
-    [],
     name='taoSync',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
     upx=True,
-    upx_exclude=[],
-    runtime_tmpdir=None,
     console=True,
     disable_windowed_traceback=False,
     argv_emulation=False,
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon=['logo.ico'],
+    # 没有 logo.ico 也不报错
+    icon='logo.ico' if os.path.exists('logo.ico') else None,
 )
