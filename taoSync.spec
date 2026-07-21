@@ -1,12 +1,11 @@
 # -*- mode: python ; coding: utf-8 -*-
 import os
 
-# 本地开发时 web/dist 构建完，CI 里会提前拷到 web/dist
 a = Analysis(
     ['main.py'],
     pathex=['.'],
     binaries=[],
-    # 关键：web/dist 里的所有东西，运行时放进 front/ 里
+    # 原版 main.py 写死了找 ./front，所以把 web/dist 映射进去
     datas=[('web/dist', 'front')],
     hiddenimports=[
         'tornado',
@@ -32,14 +31,19 @@ pyz = PYZ(a.pure)
 exe = EXE(
     pyz,
     a.scripts,
-    a.binaries,
+    a.binaries.to_pyz_data(),
+    a.zipfiles,
     a.datas,
-    [],
     name='taoSync',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
     upx=True,
     console=True,
+    disable_windowed_traceback=False,
+    argv_emulation=False,
+    target_arch=None,
+    codesign_identity=None,
+    entitlements_file=None,
     icon='logo.ico' if os.path.exists('logo.ico') else None,
 )
