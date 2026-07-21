@@ -36,9 +36,6 @@ TaoSync-CAS → 同步视频文件 → OpenList-CAS → 生成.cas文件 → Tao
 
 🐳 Docker 部署
 
-TaoSync-CAS 提供两种镜像源，你可以根据需要选择：
-
-方案一：使用 Docker Hub 镜像 (推荐)
 ```sh
 docker run -d \
   --restart=always \
@@ -47,20 +44,8 @@ docker run -d \
   --name=taosync-cas \
   miuior/taosync-cas:latest
 ```
- 
-方案二：使用 GitHub Container Registry 镜像
-```sh
-docker run -d \
-  --restart=always \
-  -p 8023:8023 \
-  -v /path/to/data:/app/data \
-  --name=taosync-cas \
-  ghcr.io/jzerom/taosync-cas:latest
-```
 
 🐳 Docker Compose 部署
-
-方案一：使用 Docker Hub 镜像 (推荐)
 
 创建 docker-compose.yml文件：
 ```sh
@@ -69,23 +54,6 @@ version: '3.8'
 services:
   taosync:
     image: miuior/taosync-cas:latest
-    container_name: taosync_cas
-    restart: always
-    ports:
-      - "8023:8023"
-    volumes:
-      - ./data:/app/data
-    environment:
-      - TZ=Asia/Shanghai
-```
-
-方案二：使用 GitHub Container Registry 镜像
-```sh
-version: '3.8'
-
-services:
-  taosync:
-    image: ghcr.io/jzerom/taosync-cas:latest
     container_name: taosync_cas
     restart: always
     ports:
