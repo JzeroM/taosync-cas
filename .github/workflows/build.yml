@@ -204,7 +204,7 @@ jobs:
           path: dist/*.zip
 
   # ============================================================
-  # 5. Android（已修复：强制 Java 8 + 清理缓存）
+  # 5. Android（已修复：手动克隆 p4a + Java 8 + 顺序修正）
   # ============================================================
   build-android:
     name: 构建Android
@@ -226,23 +226,30 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      - name: 安装安卓依赖
+
+      - name: 安装系统依赖并手动初始化 p4a
         run: |
           sudo apt-get update -y
           sudo apt-get install -y autoconf automake libtool zlib1g-dev libncurses5-dev \
-            libffi-dev libssl-dev openjdk-17-jdk build-essential
-          # 修复：安装并切换到 Java 8（Buildozer 工具链兼容所需）
+            libffi-dev libssl-dev openjdk-17-jdk build-essential git
+          mkdir -p $HOME/.buildozer/android/platform
+          git clone https://github.com/kivy/python-for-android.git $HOME/.buildozer/android/platform/python-for-android
           sudo apt-get install -y openjdk-8-jdk
           echo "JAVA_HOME=/usr/lib/jvm/java-8-openjdk-amd64" >> $GITHUB_ENV
           echo "PATH=/usr/lib/jvm/java-8-openjdk-amd64/bin:$PATH" >> $GITHUB_ENV
+
+      - name: 安装 Python 依赖
+        run: |
           pip install buildozer==1.5.0 python-for-android==2024.01.21 Cython==0.29.34
-          buildozer android clean
+
       - name: 注入版本并编译
         run: |
           cp main_android.py main.py
           ver_num="${VERSION#v}"
           sed -i "s/^version = .*/version = $ver_num/" buildozer.spec
+          buildozer android clean
           buildozer -v android debug
+
       - name: 整理产物
         run: |
           mkdir -p dist
