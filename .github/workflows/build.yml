@@ -55,14 +55,14 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: "20.x"
-          cache: npm
-          cache-dependency-path: frontend/package-lock.json
+          # 不启用缓存，避免找不到 package-lock.json 导致报错
+          cache: ""
 
       - name: 注入版本号并构建
         run: |
           sed -i "s/__version_placeholder__/$VERSION/g" frontend/src/views/page/setting/index.vue || true
           cd frontend
-          npm ci
+          npm install
           npm run build
 
       - name: 上传前端产物
@@ -81,7 +81,6 @@ jobs:
     needs: [get-version, build-frontend]
     env:
       VERSION: ${{ needs.get-version.outputs.VERSION }}
-      IS_STABLE: ${{ needs.get-version.outputs.IS_STABLE }}
     steps:
       - name: 设置 QEMU
         uses: docker/setup-qemu-action@v3
