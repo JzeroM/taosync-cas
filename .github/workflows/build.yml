@@ -204,7 +204,7 @@ jobs:
           path: dist/*.zip
 
   # ============================================================
-  # 5. Android（已修复：手动克隆 p4a + Java 8 + 顺序修正）
+  # 5. Android（已修复：移除手动 clone，让 Buildozer 自动管理 p4a）
   # ============================================================
   build-android:
     name: 构建Android
@@ -227,16 +227,11 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: 安装系统依赖并手动初始化 p4a
+      - name: 安装系统依赖
         run: |
           sudo apt-get update -y
           sudo apt-get install -y autoconf automake libtool zlib1g-dev libncurses5-dev \
-            libffi-dev libssl-dev openjdk-17-jdk build-essential git
-          mkdir -p $HOME/.buildozer/android/platform
-          git clone https://github.com/kivy/python-for-android.git $HOME/.buildozer/android/platform/python-for-android
-          sudo apt-get install -y openjdk-8-jdk
-          echo "JAVA_HOME=/usr/lib/jvm/java-8-openjdk-amd64" >> $GITHUB_ENV
-          echo "PATH=/usr/lib/jvm/java-8-openjdk-amd64/bin:$PATH" >> $GITHUB_ENV
+            libffi-dev libssl-dev openjdk-17-jdk build-essential git zip unzip
 
       - name: 安装 Python 依赖
         run: |
@@ -247,7 +242,8 @@ jobs:
           cp main_android.py main.py
           ver_num="${VERSION#v}"
           sed -i "s/^version = .*/version = $ver_num/" buildozer.spec
-          buildozer android clean
+          mkdir -p $HOME/.buildozer/android/platform/python-for-android
+          buildozer android clean || echo "Clean failed, but continuing..."
           buildozer -v android debug
 
       - name: 整理产物
