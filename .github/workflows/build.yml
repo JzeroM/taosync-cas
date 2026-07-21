@@ -1,502 +1,339 @@
-name: 构建 TaoSync-CAS
+name: 构建
 
 on:
   push:
-    branches: [ main ]
-  pull_request:
-    branches: [ main ]
+    branches: [ 'main' ]
+    paths: [ 'version.txt' ]
 
 env:
   APP_NAME: taoSync
   DOCKER_USER: miuior
   DOCKER_NAME: taosync-cas
-  GHCR_USER_LOWER: jzerom
 
 jobs:
-  # ============ 0. 获取版本号 ============
+  # ============================================================
+  # 1. 读版本
+  # ============================================================
   get-version:
     name: 获取版本号
     runs-on: ubuntu-latest
     outputs:
-      VERSION: ${{ steps.getver.outputs.VERSION }}
-      IS_STABLE: ${{ steps.getver.outputs.IS_STABLE }}
-    steps:
-      - uses: actions/checkout@v4
-      - name: 读取版本
-        id: getver
-        run: |
-          if [ -f version.txt ]; then
-            VERSION=$(cat version.txt | tr -d ' \t\n\r')
-          else
-            VERSION="v0.0.0-dev"
-          fi
-          echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
-          if [[ "$VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo "IS_STABLE=true" >> $GITHUB_OUTPUT
-          else
-            echo "IS_STABLE=false" >> $GITHUB_OUTPUT
-          fi
+      TAG_LIST: ${{ steps.getVersion.outputs.TAG_LIST }}
+      VERSION: ${{ steps.getVersion.outputs.VERSION }}
 
-  # ============ 1. 构建前端 (修正版) ============
+    steps:
+      - name: 检出仓库代码
+        uses: actions/checkout@v4
+
+      - id: getVersion
+        name: 解析 version.txt
+        run: |
+          versions=$(head -n 1 version.txt)
+          tagList=""
+          IFS=',' read -ra versionList <<< "$versions"
+          cuVersion="${versionList[0]}"
+          for version in "${versionList[@]}"; do
+            tagList+="-t $DOCKER_USER/$DOCKER_NAME:$version "
+          done
+          echo "TAG_LIST=$tagList" >> "$GITHUB_OUTPUT"
+          echo "VERSION=$cuVersion" >> "$GITHUB_OUTPUT"
+
+  # ============================================================
+  # 2. 构建前端（对齐原版 main.py 的 front/）
+  # ============================================================
   build-frontend:
     name: 构建前端
     runs-on: ubuntu-latest
-    needs: [get-version]
+    needs: [ get-version ]
     env:
       VERSION: ${{ needs.get-version.outputs.VERSION }}
+
     steps:
       - name: 检出代码
         uses: actions/checkout@v4
-        
-      # 🔥 关键修复：处理双层目录问题，找到真实的代码路径
-      - name: 定位项目根目录
-        run: |
-          # GitHub Actions 默认会拉取到 <repo>/<repo> 目录下，我们强制进入正确的路径
-          # 如果当前目录下没有 web 文件夹，尝试进入上一级
-          if [ ! -d "web" ]; then
-            cd ..
-          fi
-          echo "PROJECT_ROOT=$(pwd)" >> $GITHUB_ENV
-          ls -la
 
-      - name: 安装 Node.js
+      - name: 安装 Node.js 22.x
         uses: actions/setup-node@v4
         with:
-          node-version: "18"
-          cache: ""
+          node-version: "22.x"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
 
-      - name: 构建前端并注入版本号
-        working-directory: ${{ env.PROJECT_ROOT }}/web # 🔥 关键：指定在 web 目录下操作
+      - name: 安装依赖并构建
+        working-directory: web
         run: |
-          npm install
+          npm ci
           npm run build
-          
-          # 注入版本号到 index.html
-          if [ -f "dist/index.html" ]; then
-            sed -i "s/__version_placeholder__/$VERSION/g" dist/index.html
-          fi
-          
-          # 把构建好的 dist 复制到项目根目录下的 dist (供 PyInstaller 使用)
-          mkdir -p ../dist
-          cp -r dist/* ../dist/
 
-      - name: 上传前端产物
+      - name: 对齐前端目录（供 main.py / spec / Docker 使用）
+        run: |
+          mkdir -p front
+          cp -r web/dist/* front/
+
+      - name: 上传产物
         uses: actions/upload-artifact@v4
         with:
           name: web-dist
-          path: ${{ env.PROJECT_ROOT }}/dist
+          path: front
           retention-days: 1
 
-  # ============ 2. 构建 Docker 镜像 ============
+  # ============================================================
+  # 3. 构建多架构 Docker 镜像
+  # ============================================================
   build-docker:
-    name: 构建 Docker 镜像
+    name: 构建Docker与linux
     runs-on: ubuntu-latest
-    needs: [get-version, build-frontend]
+    needs: [ get-version, build-frontend ]
     env:
       VERSION: ${{ needs.get-version.outputs.VERSION }}
-    steps:
-      - name: 检出代码
-        uses: actions/checkout@v4
-        
-      - name: 定位项目根目录
-        run: |
-          if [ ! -d "web" ]; then
-            cd ..
-          fi
-          echo "PROJECT_ROOT=$(pwd)" >> $GITHUB_ENV
-
-      - name: 下载前端
-        uses: actions/download-artifact@v4
-        with:
-          name: web-dist
-          path: ${{ env.PROJECT_ROOT }}/dist
-
-      - name: 设置 Docker 构建变量
-        run: |
-          echo "PLATFORM=linux/amd64,linux/arm64,linux/arm/v7" >> $GITHUB_ENV
-
-      - name: 推送到 Docker Hub
-        if: needs.get-version.outputs.IS_STABLE == 'true'
-        uses: docker/build-push-action@v6
-        with:
-          context: ${{ env.PROJECT_ROOT }}
-          platforms: ${{ env.PLATFORM }}
-          push: true
-          tags: |
-            ${{ env.DOCKER_USER }}/${{ env.DOCKER_NAME }}:${{ env.VERSION }}
-            ${{ env.DOCKER_USER }}/${{ env.DOCKER_NAME }}:latest
-
-      - name: 推送到 GHCR
-        uses: docker/build-push-action@v6
-        with:
-          context: ${{ env.PROJECT_ROOT }}
-          platforms: ${{ env.PLATFORM }}
-          push: true
-          tags: |
-            ghcr.io/${{ env.GHCR_USER_LOWER }}/${{ env.DOCKER_NAME }}:${{ env.VERSION }}
-            ghcr.io/${{ env.GHCR_USER_LOWER }}/${{ env.DOCKER_NAME }}:latest
-
-  # ============ 3. Windows 构建 ============
-  build-windows:
-    name: 构建 Windows
-    runs-on: windows-latest
-    needs: [get-version, build-frontend]
-    env:
-      VERSION: ${{ needs.get-version.outputs.VERSION }}
-      APP_NAME: taoSync
-    steps:
-      - name: 检出代码
-        uses: actions/checkout@v4
-        
-      - name: 定位项目根目录
-        run: |
-          # Windows PowerShell 下处理路径
-          if (-not (Test-Path "web")) {
-            Set-Location ..
-          }
-          $env:PROJECT_ROOT = (Get-Location).Path
-          Write-Host "Project Root: $env:PROJECT_ROOT"
-          # 传给后续步骤
-          echo "PROJECT_ROOT=$env:PROJECT_ROOT" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8
-
-      - name: 下载前端
-        uses: actions/download-artifact@v4
-        with:
-          name: web-dist
-          path: ${{ env.PROJECT_ROOT }}/dist
-
-      - name: 设置 Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-
-      - name: 安装依赖并打包
-        shell: pwsh
-        run: |
-          python -m pip install 'pyinstaller>=6,<7'
-          python -m pip install -r requirements.txt
-          # 确保在项目根目录运行 PyInstaller
-          Set-Location ${{ env.PROJECT_ROOT }}
-          python -m PyInstaller ${{ env.APP_NAME }}.spec
-          cd dist
-          7z a ${{ env.APP_NAME }}-${{ env.VERSION }}-windows-amd64.zip *
-
-      - name: 上传 Artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: dist-windows-amd64
-          path: dist/*.zip
-
-  # ============ 4. Darwin (Mac) 构建 ============
-  build-darwin:
-    name: 构建 Darwin
     strategy:
       matrix:
-        os:
-          - macos-15-intel
-          - macos-14
+        platform:
+          - linux/amd64
+          - linux/arm64
+          - linux/arm/v7
+          - linux/386
+          - linux/arm/v6
+          - linux/s390x
+          - linux/ppc64le
+
+    steps:
+      - name: 替换平台名中的斜杠
+        run: |
+          platform=${{ matrix.platform }}
+          echo "PLATFORM_PAIR=${platform//\//-}" >> $GITHUB_ENV
+
+      - name: 设置 QEMU & BuildX
+        uses: docker/setup-qemu-action@v3
+        uses: docker/setup-buildx-action@v3
+
+      - name: 登录 DockerHub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ env.DOCKER_USER }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 下载前端
+        uses: actions/download-artifact@v4
+        with:
+          name: web-dist
+          path: front
+
+      - id: build-image
+        name: 构建镜像
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: ${{ matrix.platform }}
+          outputs: |
+            type=docker
+            type=image,name=${{ env.DOCKER_USER }}/${{ env.DOCKER_NAME }},push-by-digest=true,name-canonical=true,push=true
+
+      - name: 导出 digest
+        run: |
+          mkdir -p /tmp/digests
+          digest="${{ steps.build-image.outputs.digest }}"
+          touch "/tmp/digests/${digest#sha256:}"
+
+      - name: 上传 digest
+        uses: actions/upload-artifact@v4
+        with:
+          name: digests-${{ env.PLATFORM_PAIR }}
+          path: /tmp/digests/*
+          retention-days: 1
+
+  merge-docker:
+    name: 合并Docker镜像
+    runs-on: ubuntu-latest
+    needs: [get-version, build-docker]
+    env:
+      TAG_LIST: ${{ needs.get-version.outputs.TAG_LIST }}
+    steps:
+      - name: 下载 digest
+        uses: actions/download-artifact@v4
+        with:
+          path: /tmp/digests
+          pattern: digests-*
+          merge-multiple: true
+
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          username: ${{ env.DOCKER_USER }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: 推送多架构清单
+        working-directory: /tmp/digests
+        run: |
+          docker buildx imagetools create ${{ env.TAG_LIST }}$(printf '${{ env.DOCKER_USER }}/${{ env.DOCKER_NAME }}@sha256:%s ' *)
+
+  # ============================================================
+  # 4. Windows
+  # ============================================================
+  build-windows:
+    name: 构建windows
+    strategy:
+      matrix:
+        os: [windows-latest, windows-11-arm]
     runs-on: ${{ matrix.os }}
     needs: [get-version, build-frontend]
     env:
-      VERSION: ${{ needs.get-version.outputs.VERSION }}
-      APP_NAME: taoSync
+      VERSION: ${{needs.get-version.outputs.VERSION}}
     if: ${{ !contains(needs.get-version.outputs.VERSION, 'dev') }}
     steps:
       - name: 判断平台
         run: |
-          os=${{ matrix.os }}
-          if [ "$os" = "macos-15-intel" ]; then
-            PLATFORM="amd64"
-          else
-            PLATFORM="arm64"
-          fi
-          echo "PLATFORM=$PLATFORM" >> $GITHUB_ENV
+          if ("${{ matrix.os }}" -eq "windows-latest") { $p="amd64" } else { $p="arm64" }
+          "PLATFORM=$p" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
 
-      - name: 检出代码
-        uses: actions/checkout@v4
-        
-      - name: 定位项目根目录
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with: { name: web-dist, path: front }
+
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.11' }
+
+      - name: 打包
         run: |
-          if [ ! -d "web" ]; then
-            cd ..
-          fi
-          echo "PROJECT_ROOT=$(pwd)" >> $GITHUB_ENV
+          python -m pip install 'pyinstaller>=6,<7' -r requirements.txt
+          python -m PyInstaller ${{ env.APP_NAME }}.spec
+          cd dist && 7z a ${{ env.APP_NAME }}-${{ env.VERSION }}-windows-${{ env.PLATFORM }}.zip *
 
-      - name: 下载前端
-        uses: actions/download-artifact@v4
-        with:
-          name: web-dist
-          path: ${{ env.PROJECT_ROOT }}/dist
+      - uses: actions/upload-artifact@v4
+        with: { name: dist-windows-${{ env.PLATFORM }}, path: dist/*.zip }
 
-      - name: 设置 Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-
-      - name: 安装依赖并构建
-        run: |
-          python -m pip install 'pyinstaller>=6,<7'
-          python -m pip install -r requirements.txt
-          cd ${{ env.PROJECT_ROOT }}
-          python -m PyInstaller "$APP_NAME.spec"
-          cd dist
-          tar czf "$APP_NAME-$VERSION-darwin-$PLATFORM.tar.gz" .
-
-      - name: 上传 Artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: dist-darwin-${{ env.PLATFORM }}
-          path: dist/*.tar.gz
-          retention-days: 1
-
-  # ============ 5. Linux StaticX 构建 ============
-  build-staticx:
-    name: 构建 Linux StaticX
-    runs-on: ubuntu-latest
-    needs: [get-version, build-frontend]
-    env:
-      VERSION: ${{ needs.get-version.outputs.VERSION }}
-      APP_NAME: taoSync
+  # ============================================================
+  # 5. macOS
+  # ============================================================
+  build-darwin:
+    name: 构建darwin
     strategy:
       matrix:
-        platform: ["amd64", "arm64", "arm32"]
-    steps:
-      - name: 检出代码
-        uses: actions/checkout@v4
-        
-      - name: 定位项目根目录
-        run: |
-          if [ ! -d "web" ]; then
-            cd ..
-          fi
-          echo "PROJECT_ROOT=$(pwd)" >> $GITHUB_ENV
-
-      - name: 下载前端
-        uses: actions/download-artifact@v4
-        with:
-          name: web-dist
-          path: ${{ env.PROJECT_ROOT }}/dist
-
-      - name: 设置 QEMU
-        uses: docker/setup-qemu-action@v3
-        with:
-          platforms: all
-
-      - name: 设置变量
-        run: |
-          case "${{ matrix.platform }}" in
-            amd64) T_ARCH="amd64"; LIB="/usr/lib/x86_64-linux-gnu" ;;
-            arm64) T_ARCH="arm64"; LIB="/usr/lib/aarch64-linux-gnu" ;;
-            arm32) T_ARCH="arm/v7"; LIB="/usr/lib/arm-linux-gnueabihf" ;;
-          esac
-          echo "T_ARCH=$T_ARCH" >> $GITHUB_ENV
-          echo "LIB_PATH=$LIB" >> $GITHUB_ENV
-
-      - name: Docker 静态打包
-        run: |
-          docker run --rm \
-            --platform "linux/${{ env.T_ARCH }}" \
-            -v "${{ env.PROJECT_ROOT }}:/app" \
-            -w /app \
-            -e APP_NAME="${{ env.APP_NAME }}" \
-            -e LIB_PATH="${{ env.LIB_PATH }}" \
-            python:3.11-slim \
-            sh -c '
-              apt-get update && apt-get install -y --no-install-recommends \
-                build-essential zlib1g-dev patchelf binutils zip
-              rm -rf /var/lib/apt/lists/*
-              pip install --upgrade pip
-              pip install setuptools wheel scons hatchling "pyinstaller>=6,<7" staticx
-              pip install -r requirements.txt
-              export LD_LIBRARY_PATH="/usr/local/lib:${{ env.LIB_PATH }}"
-              pyinstaller "$APP_NAME.spec" \
-                --distpath "/app/dist/${{ matrix.platform }}" \
-                --workpath "/app/build/${{ matrix.platform }}" \
-                --noconfirm
-              staticx "/app/dist/${{ matrix.platform }}/$APP_NAME" "/app/dist/${{ matrix.platform }}/$APP_NAME"_StaticX
-              mv -f "/app/dist/${{ matrix.platform }}/$APP_NAME"_StaticX "/app/dist/${{ matrix.platform }}/$APP_NAME"
-              chmod 755 "/app/dist/${{ matrix.platform }}/$APP_NAME"
-            '
-
-      - name: 压缩产物
-        run: |
-          cd "${{ env.PROJECT_ROOT }}/dist/${{ matrix.platform }}"
-          zip -r "../../${{ env.APP_NAME }}-${{ env.VERSION }}-linux-StaticX-${{ matrix.platform }}.zip" .
-
-      - name: 上传 Artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: dist-linux-staticx-${{ matrix.platform }}
-          path: ${{ env.APP_NAME }}-${{ env.VERSION }}-linux-StaticX-${{ matrix.platform }}.zip
-          retention-days: 1
-
-  # ============ 6. Android 构建 ============
-  build-android:
-    name: 构建 Android
-    runs-on: ubuntu-latest
+        os: [macos-15-intel, macos-14]
+    runs-on: ${{ matrix.os }}
     needs: [get-version, build-frontend]
-    env:
-      VERSION: ${{ needs.get-version.outputs.VERSION }}
-      BUILDOZER_SPEC: buildozer.spec
-      APP_NAME: taoSync
-    steps:
-      - name: 检出代码
-        uses: actions/checkout@v4
-        
-      - name: 定位项目根目录
-        run: |
-          if [ ! -d "web" ]; then
-            cd ..
-          fi
-          echo "PROJECT_ROOT=$(pwd)" >> $GITHUB_ENV
-
-      - name: 下载前端
-        uses: actions/download-artifact@v4
-        with:
-          name: web-dist
-          path: ${{ env.PROJECT_ROOT }}/web/dist
-
-      - name: 准备 Android 资源
-        run: |
-          rm -rf front
-          cp -r web/dist front
-          test -f front/index.html
-          test -f locales/zh_CN.yaml
-
-      - name: 设置 Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-
-      - name: 安装系统依赖
-        run: |
-          sudo apt-get update -y
-          sudo apt-get install -y --no-install-recommends \
-            autoconf automake libtool pkg-config \
-            zlib1g-dev libncurses5-dev libncursesw5-dev \
-            libffi-dev libssl-dev libsqlite3-dev libbz2-dev libreadline-dev \
-            libportaudio2 libportaudiocpp0 \
-            libltdl-dev libtool-bin \
-            ccache git wget unzip zip \
-            openjdk-17-jdk build-essential
-          sudo ln -sf "$(which python3)" /usr/bin/python
-          echo "ACLOCAL_PATH=/usr/share/aclocal" >> "$GITHUB_ENV"
-
-      - name: 配置 Java
-        run: |
-          echo "JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64" >> "$GITHUB_ENV"
-          echo "/usr/lib/jvm/java-17-openjdk-amd64/bin" >> "$GITHUB_PATH"
-
-      - name: 安装 Buildozer
-        run: |
-          python -m pip install --upgrade pip
-          python -m pip install "buildozer==1.5.0" "python-for-android==2024.01.21" "Cython==0.29.34" virtualenv
-          python -c "import pythonforandroid; print('p4a version:', pythonforandroid.__version__)"
-
-      - name: 缓存
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.buildozer
-            ~/.gradle
-          key: buildozer-${{ runner.os }}-p4a2024-v6-py311-${{ hashFiles('buildozer.spec', 'requirements.txt') }}
-          restore-keys: |
-            buildozer-${{ runner.os }}-p4a2024-v6-py311-
-
-      - name: 清理旧产物
-        run: |
-          rm -rf .buildozer bin .python-for-android
-
-      - name: 切换入口
-        run: |
-          test -f "$BUILDOZER_SPEC"
-          test -f main_android.py
-          cp main_android.py main.py
-
-      - name: 注入 Android 版本号
-        run: |
-          ver_num="${VERSION#v}"
-          sed -i "s/^version = .*/version = $ver_num/" "$BUILDOZER_SPEC"
-          IFS='.' read -r major minor patch <<< "$ver_num"
-          major="${major%%[!0-9]*}"; major="${major:-0}"
-          minor="${minor%%[!0-9]*}"; minor="${minor:-0}"
-          patch="${patch%%[!0-9]*}"; patch="${patch:-0}"
-          numeric_version=$(( major*10000 + minor*100 + patch ))
-          sed -i "/^android.numeric_version[[:space:]]*=/d" "$BUILDOZER_SPEC"
-          sed -i "/^version[[:space:]]*=/a android.numeric_version = $numeric_version" "$BUILDOZER_SPEC"
-          grep -E "^(version|android.numeric_version)" "$BUILDOZER_SPEC"
-
-      - name: 编译 APK
-        run: PYTHONWARNINGS="ignore:Unable to find acceptable character detection:UserWarning" buildozer -v android debug
-
-      - name: 整理产物
-        run: |
-          mkdir -p dist
-          apk_path=$(find bin -maxdepth 1 -name '*.apk' -print -quit)
-          if [ -z "$apk_path" ]; then
-            echo "::error::未找到编译产物 APK"
-            exit 1
-          fi
-          cp "$apk_path" "dist/${APP_NAME}-${VERSION}-android-debug.apk"
-
-      - name: 上传 Artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: dist-android
-          path: dist/*.apk
-          if-no-files-found: error
-          retention-days: 1
-          compression-level: 0
-
-  # ============ 7. 创建 Release ============
-  create-release:
-    name: 发布 Release
-    runs-on: ubuntu-latest
-    needs: [get-version, build-windows, build-darwin, build-docker, build-staticx, build-android]
-    env:
-      VERSION: ${{ needs.get-version.outputs.VERSION }}
+    env: { VERSION: ${{needs.get-version.outputs.VERSION}} }
     if: ${{ !contains(needs.get-version.outputs.VERSION, 'dev') }}
     steps:
-      - name: 检出代码
-        uses: actions/checkout@v4
-        
-      - name: 定位项目根目录
+      - name: 判断平台
         run: |
-          if [ ! -d "web" ]; then
-            cd ..
-          fi
-          echo "PROJECT_ROOT=$(pwd)" >> $GITHUB_ENV
+          [[ "${{ matrix.os }}" == *intel* ]] && echo "PLATFORM=amd64" >> $GITHUB_ENV || echo "PLATFORM=arm64" >> $GITHUB_ENV
 
-      - name: 下载全部产物
-        uses: actions/download-artifact@v4
-        with:
-          pattern: dist-*
-          path: ${{ env.PROJECT_ROOT }}/dist
-          merge-multiple: true
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with: { name: web-dist, path: front }
 
-      - name: 检查 Android 产物
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.11' }
+
+      - name: 打包
         run: |
-          apk_path=$(find dist -maxdepth 1 -type f -name "${APP_NAME}-${VERSION}-android-*.apk" -print -quit)
-          if [ -z "$apk_path" ]; then
-            echo "::error::Release 中缺少 Android APK"
-            exit 1
-          fi
-          echo "Android APK: $apk_path"
+          pip install 'pyinstaller>=6,<7' -r requirements.txt
+          python -m PyInstaller "$APP_NAME.spec"
+          cd dist && tar czf "$APP_NAME-$VERSION-darwin-$PLATFORM.tar.gz" .
 
-      - name: 创建日志文件
+      - uses: actions/upload-artifact@v4
+        with: { name: dist-darwin-${{ env.PLATFORM }}, path: dist/*.tar.gz }
+
+  # ============================================================
+  # 6. Linux StaticX
+  # ============================================================
+  build-staticx:
+    name: 构建Linux StaticX
+    runs-on: ubuntu-latest
+    needs: [get-version, build-frontend]
+    env: { VERSION: ${{ needs.get-version.outputs.VERSION }} }
+    strategy: { matrix: { platform: ["amd64","arm64","arm32"] } }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with: { name: web-dist, path: front }
+
+      - uses: docker/setup-qemu-action@v3
+        with: { platforms: all }
+
+      - name: 设置架构
         run: |
-          version_first=$(echo $VERSION | cut -d'-' -f1)
-          LOG_FILE="doc/changelog/$version_first.md"
-          if [ ! -f "$LOG_FILE" ]; then
-            touch "$LOG_FILE"
-            echo "$VERSION" > "$LOG_FILE"
-          fi
-          echo "LOG_FILE=$LOG_FILE" >> $GITHUB_ENV
+          case "${{ matrix.platform }}" in
+            amd64) echo "T_ARCH=amd64;LIB=/usr/lib/x86_64-linux-gnu" ;;
+            arm64) echo "T_ARCH=arm64;LIB=/usr/lib/aarch64-linux-gnu" ;;
+            arm32) echo "T_ARCH=arm/v7;LIB=/usr/lib/arm-linux-gnueabihf" ;;
+          esac >> $GITHUB_ENV
 
-      - name: 创建 Release
-        uses: softprops/action-gh-release@v2
+      - name: 容器内静态打包
+        run: |
+          IMG="python:3.11-slim-bullseye"
+          [[ "${{ matrix.platform }}" == arm* ]] && IMG="arm32v7/${IMG}" || true
+          [[ "${{ matrix.platform }}" == arm64 ]] && IMG="arm64v8/${IMG}" || true
+          docker run --rm --platform linux/${T_ARCH} -v $PWD:/app -w /app \
+            -e APP_NAME=${APP_NAME} -e LIB_PATH=${LIB} ${IMG} sh -c '
+              apt-get update && apt-get install -y build-essential zlib1g-dev patchelf binutils zip
+              pip install --upgrade pip && pip install "pyinstaller>=6,<7" staticx -r requirements.txt
+              pyinstaller ${APP_NAME}.spec --distpath dist/${MATRIX} --noconfirm
+              staticx dist/${MATRIX}/${APP_NAME} dist/${MATRIX}/${APP_NAME}_sx
+              mv dist/${MATRIX}/${APP_NAME}_sx dist/${MATRIX}/${APP_NAME}
+            '
+        env: { MATRIX: ${{ matrix.platform }}
+
+      - run: |
+          cd dist/${{ matrix.platform }} && zip -r ../../${APP_NAME}-${VERSION}-linux-StaticX-${{ matrix.platform }}.zip .
+      - uses: actions/upload-artifact@v4
+        with: { name: dist-linux-staticx-${{ matrix.platform }}, path: "*.zip" }
+
+  # ============================================================
+  # 7. Android
+  # ============================================================
+  build-android:
+    name: 构建Android
+    runs-on: ubuntu-latest
+    needs: [get-version, build-frontend]
+    env: { VERSION: ${{ needs.get-version.outputs.VERSION }} }
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          rm -rf front && cp -r web/dist front
+          test -f front/index.html
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.11' }
+      - run: |
+          sudo apt-get update -y && sudo apt-get install -y autoconf automake libtool zlib1g-dev \
+            libncurses5-dev libffi-dev libssl-dev openjdk-17-jdk build-essential
+          pip install buildozer==1.5.0 python-for-android==2024.01.21 Cython==0.29.34
+          cp main_android.py main.py
+          ver_num="${VERSION#v}"
+          sed -i "s/^version = .*/version = $ver_num/" buildozer.spec
+          buildozer -v android debug
+      - run: |
+          mkdir -p dist && cp bin/*.apk dist/${APP_NAME}-${VERSION}-android-debug.apk
+      - uses: actions/upload-artifact@v4
+        with: { name: dist-android, path: dist/*.apk }
+
+  # ============================================================
+  # 8. Release
+  # ============================================================
+  create-release:
+    name: 发布release
+    runs-on: ubuntu-latest
+    needs: [get-version, build-windows, build-darwin, build-docker, build-staticx, build-android]
+    env: { VERSION: ${{needs.get-version.outputs.VERSION}} }
+    if: ${{ !contains(needs.get-version.outputs.VERSION, 'dev') }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with: { pattern: dist-*, path: dist, merge-multiple: true }
+
+      - name: 生成 changelog
+        run: |
+          LOG="doc/changelog/${VERSION%%-*}.md"
+          [ -f "$LOG" ] || echo "$VERSION 自动构建发布" > $LOG
+          echo "LOG=$LOG" >> $GITHUB_ENV
+
+      - uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ env.VERSION }}
-          files: ${{ env.PROJECT_ROOT }}/dist/*
-          body_path: ${{ env.LOG_FILE }}
-          prerelease: ${{ contains(env.VERSION, 'dev') || contains(env.VERSION, 'pre') || contains(env.VERSION, 'beta') }}
+          files: dist/*
+          body_path: ${{ env.LOG }}
+          prerelease: false
