@@ -35,7 +35,7 @@ jobs:
           fi
 
   # ============================================================
-  # 2. 构建前端（Vite 默认输出 dist/）
+  # 2. 构建前端
   # ============================================================
   build-frontend:
     name: 构建前端
@@ -50,7 +50,7 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: "20"
-          cache: ""   # 不自动缓存，避免 lock 文件缺失报错
+          cache: ""
 
       - name: 注入版本号并构建
         run: |
@@ -59,21 +59,22 @@ jobs:
           fi
           npm install
           npm run build
-          # 验证产物：main.py 需要 front/index.html
-          if [ ! -f "dist/index.html" ]; then
-            echo "❌ 前端构建失败：dist/index.html 不存在"
-            exit 1
-          fi
+          test -f dist/index.html || { echo "❌ 前端构建失败"; exit 1; }
 
-      - name: 上传前端产物
+      - name: 对齐运行时目录（给 Docker / PyInstaller 用）
+        run: |
+          mkdir -p front
+          cp -r dist/* front/
+
+      - name: 上传产物
         uses: actions/upload-artifact@v4
         with:
           name: frontend-dist
-          path: dist/
+          path: front/
           retention-days: 1
 
   # ============================================================
-  # 3. 构建并推送 Docker 镜像
+  # 3. 构建并推送多架构镜像
   # ============================================================
   build-docker:
     name: 构建 Docker 镜像
@@ -101,17 +102,11 @@ jobs:
 
       - uses: actions/checkout@v4
 
-      - name: 下载前端产物
+      - name: 下载前端对齐产物
         uses: actions/download-artifact@v4
         with:
           name: frontend-dist
-          path: dist
-
-      # —— 关键：给 Dockerfile 里的 /app/front 准备好目录 ——
-      - name: 对齐 main.py 的前端路径
-        run: |
-          mkdir -p front
-          cp -r dist/* front/
+          path: front
 
       - name: 推送到 Docker Hub
         if: needs.get-version.outputs.IS_STABLE == 'true'
@@ -135,10 +130,10 @@ jobs:
             ghcr.io/${{ env.GHCR_USER_LOWER }}/${{ env.DOCKER_NAME }}:latest
 
   # ============================================================
-  # 4. 构建 PyInstaller 单文件（Windows / Linux）
+  # 4. PyInstaller 打 Linux 单文件
   # ============================================================
-  build-executables:
-    name: 构建可执行文件
+  build-binary:
+    name: 构建 Linux 二进制
     runs-on: ubuntu-latest
     needs: [get-version, build-frontend]
     env:
@@ -150,12 +145,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: frontend-dist
-          path: dist
-
-      - name: 对齐 PyInstaller 需要的 front/ 目录
-        run: |
-          mkdir -p front
-          cp -r dist/* front/
+          path: front
 
       - name: 设置 Python
         uses: actions/setup-python@v5
@@ -165,38 +155,34 @@ jobs:
       - name: 安装依赖并打包
         run: |
           pip install -r requirements.txt "pyinstaller>=6,<7"
-          pyinstaller --onefile --name taoSync \
-            --add-data "front:front" \
-            --icon=logo.ico main.py
+          pyinstaller --onefile --name taoSync --add-data "front:front" main.py
 
-      - name: 上传 Linux 单文件
+      - name: 打包单文件
+        run: |
+          chmod +x dist/taoSync
+          tar czf taosync-cas-${{ env.VERSION }}-linux-amd64.tar.gz -C dist taoSync
+
+      - name: 上传
         uses: actions/upload-artifact@v4
         with:
           name: linux-binary
-          path: dist/taoSync
+          path: taosync-cas-${{ env.VERSION }}-linux-amd64.tar.gz
+          retention-days: 5
 
   # ============================================================
-  # 5. 创建 Release
+  # 5. 发 Release
   # ============================================================
   create-release:
     name: 创建 Release
     runs-on: ubuntu-latest
     if: ${{ !contains(needs.get-version.outputs.VERSION, 'dev') }}
-    needs: [get-version, build-docker, build-executables]
+    needs: [get-version, build-docker, build-binary]
     env:
       VERSION: ${{ needs.get-version.outputs.VERSION }}
     steps:
-      - uses: actions/checkout@v4
-
-      - name: 下载可执行文件
-        uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v4
         with:
           name: linux-binary
-
-      - name: 打包 Linux CLI
-        run: |
-          chmod +x taoSync
-          tar czf taosync-cas-${{ env.VERSION }}-linux-amd64.tar.gz taoSync
 
       - name: 生成 Release Notes
         run: |
@@ -205,14 +191,13 @@ jobs:
 
           - 🐳 Docker Hub: \`miuior/taosync-cas:$VERSION\`
           - 📦 GHCR: \`ghcr.io/jzerom/taosync-cas:$VERSION\`
-          - 🐧 Linux 单文件（无需 Python 环境）
+          - 🐧 Linux 单文件（零依赖，解压即用）
 
-          > 社区魔改分支，保留 CAS 联动特性。
+          > 社区魔改分支 · 保留 CAS 特性
           EOF
 
       - uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ env.VERSION }}
           body_path: notes.md
-          files: |
-            taosync-cas-${{ env.VERSION }}-linux-amd64.tar.gz
+          files: taosync-cas-${{ env.VERSION }}-linux-amd64.tar.gz
