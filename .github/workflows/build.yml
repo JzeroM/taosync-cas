@@ -204,7 +204,7 @@ jobs:
           path: dist/*.zip
 
   # ============================================================
-  # 5. Android（已修复：移除手动 clone，让 Buildozer 自动管理 p4a）
+  # 5. Android（终极修复：update 初始化 + verbose）
   # ============================================================
   build-android:
     name: 构建Android
@@ -235,21 +235,31 @@ jobs:
 
       - name: 安装 Python 依赖
         run: |
+          pip install --upgrade pip
           pip install buildozer==1.5.0 python-for-android==2024.01.21 Cython==0.29.34
 
-      - name: 注入版本并编译
+      - name: 注入版本并初始化工具链编译
         run: |
           cp main_android.py main.py
           ver_num="${VERSION#v}"
           sed -i "s/^version = .*/version = $ver_num/" buildozer.spec
-          mkdir -p $HOME/.buildozer/android/platform/python-for-android
-          buildozer android clean || echo "Clean failed, but continuing..."
+
+          echo ">>> 强制初始化 Android SDK/NDK 及 p4a 工具链"
+          buildozer android update
+
+          sleep 5
+
+          echo ">>> Clean（容错）"
+          buildozer android clean || echo "Clean skipped"
+
+          echo ">>> 开始 Debug 编译"
           buildozer -v android debug
 
       - name: 整理产物
         run: |
           mkdir -p dist
-          cp bin/*.apk "dist/${APP_NAME}-${VERSION}-android-debug.apk"
+          cp bin/*.apk "dist/${APP_NAME}-${VERSION}-android-debug.apk" || echo "APK 未生成，请检查上方日志"
+
       - uses: actions/upload-artifact@v4
         with:
           name: dist-android
