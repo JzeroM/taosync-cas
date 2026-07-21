@@ -1,23 +1,42 @@
-name: Build and Release
+name: 构建
 
 on:
   push:
-    tags:
-      - 'v*'
+    branches: [ 'main' ]
+    paths: [ 'version.txt' ]
+
+env:
+  APP_NAME: taoSync
+  DOCKER_USER: miuior
+  DOCKER_NAME: taosync-cas
 
 jobs:
   # ============================================================
-  # 1. 获取版本号
+  # 1. 读版本
   # ============================================================
   get-version:
     name: 获取版本号
     runs-on: ubuntu-latest
     outputs:
-      VERSION: ${{ steps.version.outputs.VERSION }}
+      TAG_LIST: ${{ steps.getVersion.outputs.TAG_LIST }}
+      VERSION: ${{ steps.getVersion.outputs.VERSION }}
+
     steps:
-      - name: 提取版本号
-        id: version
-        run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+      - name: 检出仓库代码
+        uses: actions/checkout@v4
+
+      - id: getVersion
+        name: 解析 version.txt
+        run: |
+          versions=$(head -n 1 version.txt)
+          tagList=""
+          IFS=',' read -ra versionList <<< "$versions"
+          cuVersion="${versionList[0]}"
+          for version in "${versionList[@]}"; do
+            tagList+="-t $DOCKER_USER/$DOCKER_NAME:$version "
+          done
+          echo "TAG_LIST=$tagList" >> "$GITHUB_OUTPUT"
+          echo "VERSION=$cuVersion" >> "$GITHUB_OUTPUT"
 
   # ============================================================
   # 2. 构建前端
@@ -25,63 +44,167 @@ jobs:
   build-frontend:
     name: 构建前端
     runs-on: ubuntu-latest
+    needs: [ get-version ]
+    env:
+      VERSION: ${{ needs.get-version.outputs.VERSION }}
+
     steps:
-      - uses: actions/checkout@v4
-      # 假设你有前端构建步骤，这里省略 npm/yarn 构建
-      - name: 模拟前端构建
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 安装 Node.js 22.x
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22.x"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: 安装依赖并构建
+        working-directory: web
         run: |
-          mkdir -p web/dist
-          echo "<html>Hello</html>" > web/dist/index.html
-      - uses: actions/upload-artifact@v4
+          npm ci
+          npm run build
+
+      - name: 对齐前端目录
+        run: |
+          mkdir -p front
+          cp -r web/dist/* front/
+
+      - name: 上传产物
+        uses: actions/upload-artifact@v4
         with:
           name: web-dist
-          path: web/dist
+          path: front
+          retention-days: 1
 
   # ============================================================
-  # 3. 构建 Windows (示例)
+  # 3. Docker
+  # ============================================================
+  build-docker:
+    name: 构建Docker与linux
+    runs-on: ubuntu-latest
+    needs: [ get-version, build-frontend ]
+    env:
+      VERSION: ${{ needs.get-version.outputs.VERSION }}
+    strategy:
+      matrix:
+        platform:
+          - linux/amd64
+          - linux/arm64
+
+    steps:
+      - name: 替换平台名中的斜杠
+        run: |
+          platform=${{ matrix.platform }}
+          echo "PLATFORM_PAIR=${platform//\//-}" >> $GITHUB_ENV
+
+      - name: 设置 QEMU & BuildX
+        uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+
+      - name: 登录 DockerHub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ env.DOCKER_USER }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 下载前端
+        uses: actions/download-artifact@v4
+        with:
+          name: web-dist
+          path: front
+
+      - id: build-image
+        name: 构建镜像
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: ${{ matrix.platform }}
+          outputs: |
+            type=docker
+            type=image,name=${{ env.DOCKER_USER }}/${{ env.DOCKER_NAME }},push-by-digest=true,name-canonical=true,push=true
+
+      - name: 导出 digest
+        run: |
+          mkdir -p /tmp/digests
+          digest="${{ steps.build-image.outputs.digest }}"
+          touch "/tmp/digests/${digest#sha256:}"
+
+      - name: 上传 digest
+        uses: actions/upload-artifact@v4
+        with:
+          name: digests-${{ env.PLATFORM_PAIR }}
+          path: /tmp/digests/*
+          retention-days: 1
+
+  merge-docker:
+    name: 合并Docker镜像
+    runs-on: ubuntu-latest
+    needs: [get-version, build-docker]
+    env:
+      TAG_LIST: ${{ needs.get-version.outputs.TAG_LIST }}
+    steps:
+      - name: 下载 digest
+        uses: actions/download-artifact@v4
+        with:
+          path: /tmp/digests
+          pattern: digests-*
+          merge-multiple: true
+
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          username: ${{ env.DOCKER_USER }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: 推送多架构清单
+        working-directory: /tmp/digests
+        run: |
+          docker buildx imagetools create ${{ env.TAG_LIST }}$(printf '${{ env.DOCKER_USER }}/${{ env.DOCKER_NAME }}@sha256:%s ' *)
+
+  # ============================================================
+  # 4. Windows
   # ============================================================
   build-windows:
-    name: 构建Windows
+    name: 构建windows
     runs-on: windows-latest
     needs: [get-version, build-frontend]
     env:
       VERSION: ${{ needs.get-version.outputs.VERSION }}
-      APP_NAME: YourAppName
+    if: ${{ !contains(needs.get-version.outputs.VERSION, 'dev') }}
     steps:
+      - name: 标记平台
+        shell: pwsh
+        run: echo "PLATFORM=amd64" >> $env:GITHUB_ENV
+
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
           name: web-dist
-          path: web/dist
-      - name: 对齐前端目录
-        run: |
-          rm -rf front
-          cp -r web/dist front
+          path: front
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
       - name: 打包
+        shell: pwsh
         run: |
-          python -m pip install pyinstaller -r requirements.txt
+          python -m pip install 'pyinstaller>=6,<7' -r requirements.txt
           python -m PyInstaller ${{ env.APP_NAME }}.spec
-          mkdir -p dist
-          7z a ${{ env.APP_NAME }}-${{ env.VERSION }}-windows-amd64.zip dist/*.exe
+          cd dist
+          7z a ${{ env.APP_NAME }}-${{ env.VERSION }}-windows-amd64.zip *
+
       - uses: actions/upload-artifact@v4
         with:
           name: dist-windows-amd64
           path: dist/*.zip
 
   # ============================================================
-  # 4. 构建 Docker (示例)
-  # ============================================================
-  build-docker:
-    name: 构建Docker
-    runs-on: ubuntu-latest
-    needs: [get-version]
-    steps:
-      - uses: actions/checkout@v4
-      - name: 构建镜像
-        run: docker build -t your-image:${{ needs.get-version.outputs.VERSION }} .
-
-  # ============================================================
-  # 5. 构建 Android (终极修复版)
+  # 5. Android（最稳保守写法）
   # ============================================================
   build-android:
     name: 构建Android
@@ -89,74 +212,43 @@ jobs:
     needs: [get-version, build-frontend]
     env:
       VERSION: ${{ needs.get-version.outputs.VERSION }}
-      APP_NAME: YourAppName
     steps:
-      - uses: actions/checkout@v4
-      
-      # 下载前端
+      - name: 检出代码并下载前端
+        uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
           name: web-dist
           path: web/dist
-          
-      # 对齐目录
+
       - name: 对齐前端目录
         run: |
           rm -rf front
           cp -r web/dist front
-          test -f front/index.html || (echo "Frontend missing!" && exit 1)
 
-      # 设置 Python
-      - uses: actions/setup-python@v5
+      - name: 设置 Python
+        uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-          cache: 'pip'
 
-      # 安装系统依赖 (关键：清理旧 JDK，确保只有 JDK 17)
-      - name: 安装系统依赖
+      - name: 安装依赖
         run: |
           sudo apt-get update -y
-          sudo apt-get remove -y openjdk-11-jdk openjdk-8-jdk || true # 强制移除旧版，防止冲突
-          sudo apt-get install -y -qq \
-            autoconf automake libtool zlib1g-dev libncurses5-dev \
-            libffi-dev libssl-dev openjdk-17-jdk build-essential git zip unzip \
-            python3-dev python3-pip python3-setuptools
-
-      # 安装 Python 依赖
-      - name: 安装 Python 依赖
-        run: |
+          sudo apt-get install -y autoconf automake libtool zlib1g-dev libncurses5-dev libffi-dev libssl-dev openjdk-17-jdk git build-essential
           pip install --upgrade pip
-          pip install buildozer==1.5.0 python-for-android==2024.01.21 Cython==0.29.34
+          pip install buildozer python-for-android Cython
 
-      # 关键步骤：初始化并编译
-      - name: 注入版本并编译 (开启最高日志级别)
-        working-directory: ${{ github.workspace }}
+      - name: 初始化并编译
         run: |
-          # 1. 准备文件
           cp main_android.py main.py
-          ver_num="${VERSION#v}"
-          sed -i "s/^version = .*/version = $ver_num/" buildozer.spec
-          
-          echo ">>> 强制清理旧构建缓存..."
-          rm -rf .buildozer
-          
-          echo ">>> 强制初始化 Android 工具链..."
-          # 使用绝对路径执行，并开启最高级别日志
-          /opt/hostedtoolcache/Python/3.11.15/x64/bin/buildozer -vv android update
-          
-          echo ">>> 开始编译 APK..."
-          # -vv 是关键，会打印出具体的 Cython/Java 编译错误
-          /opt/hostedtoolcache/Python/3.11.15/x64/bin/buildozer -vv android debug
+          sed -i "s/^version = .*/version = ${VERSION#v}/" buildozer.spec
+          buildozer -v android debug
 
-      # 收集产物 (无论成功与否都尝试收集，用于排查)
       - name: 收集产物
-        if: always() # 即使编译失败也运行
+        if: always()
         run: |
           mkdir -p dist
-          # 查找生成的 APK
-          find . -name "*.apk" -exec cp {} dist/ \; || echo "APK not found, check logs above."
-          
-      # 上传产物
+          find bin -name "*.apk" -exec cp {} dist/ \; || true
+
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -193,4 +285,3 @@ jobs:
           tag_name: ${{ env.VERSION }}
           files: dist/**
           body_path: ${{ env.LOG }}
-          prerelease: false
