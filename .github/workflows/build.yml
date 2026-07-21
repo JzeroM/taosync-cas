@@ -1,4 +1,4 @@
-name: 构建TaoSync-CAS
+name: 构建 TaoSync-CAS
 
 on:
   push:
@@ -6,131 +6,115 @@ on:
     paths: ["version.txt"]
 
 env:
-  APP_NAME: taosync
+  APP_NAME: taoSync
   DOCKER_USER: miuior
   DOCKER_NAME: taosync-cas
   GHCR_USER_LOWER: jzerom
 
 jobs:
+  # ============================================================
+  # 1. 读版本
+  # ============================================================
   get-version:
     name: 获取版本号
     runs-on: ubuntu-latest
     outputs:
-      TAG_LIST: ${{ steps.getVersion.outputs.TAG_LIST }}
-      VERSION: ${{ steps.getVersion.outputs.VERSION }}
-      PUSH_TO_DOCKERHUB: ${{ steps.getVersion.outputs.PUSH_TO_DOCKERHUB }}
-    
+      VERSION: ${{ steps.read.outputs.VERSION }}
+      IS_STABLE: ${{ steps.read.outputs.IS_STABLE }}
     steps:
-      - name: 检出代码
-        uses: actions/checkout@v4
-      
-      - name: 读取版本
-        id: getVersion
+      - uses: actions/checkout@v4
+      - name: 解析 version.txt
+        id: read
         run: |
-          versions=$(head -n 1 version.txt)
-          tagList=""
-          IFS=',' read -ra versionList <<< "$versions"
-          cuVersion="${versionList[0]}"
-          pushToDockerHub="false"
-          
-          for version in "${versionList[@]}"; do
-            tagList+="-t $DOCKER_USER/$DOCKER_NAME:$version "
-            if [[ ! "$version" =~ (dev|pre|beta) ]]; then
-              pushToDockerHub="true"
-            fi
-          done
-          
-          echo "TAG_LIST=$tagList" >> "$GITHUB_OUTPUT"
-          echo "VERSION=$cuVersion" >> "$GITHUB_OUTPUT"
-          echo "PUSH_TO_DOCKERHUB=$pushToDockerHub" >> "$GITHUB_OUTPUT"
+          VER=$(head -n1 version.txt | tr -d '\r' | xargs)
+          echo "VERSION=$VER" >> "$GITHUB_OUTPUT"
+          if [[ "$VER" =~ (dev|pre|beta) ]]; then
+            echo "IS_STABLE=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "IS_STABLE=true" >> "$GITHUB_OUTPUT"
+          fi
 
+  # ============================================================
+  # 2. 构建前端（Vite 默认输出 dist/）
+  # ============================================================
   build-frontend:
     name: 构建前端
     runs-on: ubuntu-latest
     needs: [get-version]
     env:
       VERSION: ${{ needs.get-version.outputs.VERSION }}
-    
     steps:
-      - name: 检出代码
-        uses: actions/checkout@v4
-      
+      - uses: actions/checkout@v4
+
       - name: 安装 Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: "20" # 建议升级到 20
-          cache: ""         # 禁用自动缓存避免报错
+          node-version: "20"
+          cache: ""   # 不自动缓存，避免 lock 文件缺失报错
 
       - name: 注入版本号并构建
         run: |
-          # 关键修改：根目录下直接操作，不再进入 frontend 目录
-          # 检查 package.json 是否存在
-          if [ ! -f "package.json" ]; then
-            echo "❌ 错误：根目录找不到 package.json！"
-            exit 1
-          fi
-          
-          # 尝试替换版本号（如果根目录的 html/vue 文件中有占位符）
-          # 注意：原版的 __version_placeholder__ 可能在 index.html 中
           if [ -f "index.html" ]; then
             sed -i "s/__version_placeholder__/$VERSION/g" index.html
-            echo "✅ 已注入版本号到 index.html"
-          else
-            echo "⚠️ 未找到 index.html，跳过版本注入"
           fi
-          
-          # 安装依赖并构建
           npm install
           npm run build
-          echo "✅ 前端构建完成"
+          # 验证产物：main.py 需要 front/index.html
+          if [ ! -f "dist/index.html" ]; then
+            echo "❌ 前端构建失败：dist/index.html 不存在"
+            exit 1
+          fi
 
       - name: 上传前端产物
         uses: actions/upload-artifact@v4
         with:
           name: frontend-dist
-          path: dist/ # Vite 默认构建输出目录是 dist
+          path: dist/
           retention-days: 1
 
+  # ============================================================
+  # 3. 构建并推送 Docker 镜像
+  # ============================================================
   build-docker:
-    name: 构建Docker镜像
+    name: 构建 Docker 镜像
     runs-on: ubuntu-latest
     needs: [get-version, build-frontend]
     env:
       VERSION: ${{ needs.get-version.outputs.VERSION }}
-      PUSH_TO_DOCKERHUB: ${{ needs.get-version.outputs.PUSH_TO_DOCKERHUB }}
-    
     steps:
-      - name: 设置QEMU
-        uses: docker/setup-qemu-action@v3
-      
-      - name: 设置BuildX
-        uses: docker/setup-buildx-action@v3
-      
-      - name: 登录Docker Hub
-        if: env.PUSH_TO_DOCKERHUB == 'true'
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+
+      - name: 登录 Docker Hub
+        if: needs.get-version.outputs.IS_STABLE == 'true'
         uses: docker/login-action@v3
         with:
           username: ${{ env.DOCKER_USER }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
-      
-      - name: 登录GHCR
+
+      - name: 登录 GHCR
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      
-      - name: 检出代码
-        uses: actions/checkout@v4
-      
-      - name: 下载前端
+
+      - uses: actions/checkout@v4
+
+      - name: 下载前端产物
         uses: actions/download-artifact@v4
         with:
           name: frontend-dist
-          path: dist # 下载到 dist 目录，匹配 Dockerfile 的 COPY 路径
-      
-      - name: 推送到Docker Hub
-        if: env.PUSH_TO_DOCKERHUB == 'true'
+          path: dist
+
+      # —— 关键：给 Dockerfile 里的 /app/front 准备好目录 ——
+      - name: 对齐 main.py 的前端路径
+        run: |
+          mkdir -p front
+          cp -r dist/* front/
+
+      - name: 推送到 Docker Hub
+        if: needs.get-version.outputs.IS_STABLE == 'true'
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -139,11 +123,8 @@ jobs:
           tags: |
             ${{ env.DOCKER_USER }}/${{ env.DOCKER_NAME }}:${{ env.VERSION }}
             ${{ env.DOCKER_USER }}/${{ env.DOCKER_NAME }}:latest
-          labels: |
-            org.opencontainers.image.version=${{ env.VERSION }}
-            org.opencontainers.image.source=https://github.com/${{ github.repository }}
-      
-      - name: 推送到GHCR
+
+      - name: 推送到 GHCR
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -152,173 +133,86 @@ jobs:
           tags: |
             ghcr.io/${{ env.GHCR_USER_LOWER }}/${{ env.DOCKER_NAME }}:${{ env.VERSION }}
             ghcr.io/${{ env.GHCR_USER_LOWER }}/${{ env.DOCKER_NAME }}:latest
-          labels: |
-            org.opencontainers.image.version=${{ env.VERSION }}
-            org.opencontainers.image.source=https://github.com/${{ github.repository }}
 
-  build-source-packages:
-    name: 构建源码包
+  # ============================================================
+  # 4. 构建 PyInstaller 单文件（Windows / Linux）
+  # ============================================================
+  build-executables:
+    name: 构建可执行文件
     runs-on: ubuntu-latest
     needs: [get-version, build-frontend]
     env:
       VERSION: ${{ needs.get-version.outputs.VERSION }}
-    
-    steps:
-      - name: 检出代码
-        uses: actions/checkout@v4
-      
-      - name: 下载前端
-        uses: actions/download-artifact@v4
-        with:
-          name: frontend-dist
-          path: dist
-      
-      - name: 创建源码包
-        run: |
-          mkdir -p "taosync-cas-$VERSION"
-          cp -r *.py *.txt *.spec *.md requirements.txt service/ common/ controller/ mapper/ "taosync-cas-$VERSION/"
-          mkdir -p "taosync-cas-$VERSION/dist"
-          cp -r dist/* "taosync-cas-$VERSION/dist/"
-          
-          cat > "taosync-cas-$VERSION/start.sh" << 'EOF'
-          #!/bin/bash
-          cd "$(dirname "$0")"
-          python3 -m venv venv
-          source venv/bin/activate
-          pip install -r requirements.txt
-          python main.py
-          EOF
-          
-          chmod +x "taosync-cas-$VERSION/start.sh"
-          
-          tar czf "taosync-cas-$VERSION-source.tar.gz" "taosync-cas-$VERSION/"
-      
-      - name: 上传源码包
-        uses: actions/upload-artifact@v4
-        with:
-          name: source-package
-          path: "taosync-cas-${{ env.VERSION }}-source.tar.gz"
-          retention-days: 1
-
-  build-windows-package:
-    name: 构建Windows包
-    runs-on: windows-latest
-    needs: [get-version, build-frontend]
-    env:
-      VERSION: ${{ needs.get-version.outputs.VERSION }}
-    
-    steps:
-      - name: 检出代码
-        uses: actions/checkout@v4
-      
-      - name: 下载前端
-        uses: actions/download-artifact@v4
-        with:
-          name: frontend-dist
-          path: dist
-      
-      - name: 创建Windows包
-        run: |
-          $releaseDir = "taosync-cas-$env:VERSION-windows-amd64"
-          New-Item -ItemType Directory -Force -Path $releaseDir
-          
-          Copy-Item -Path *.py,*.txt,*.spec,*.md -Destination $releaseDir/ -Force
-          Copy-Item -Path service/,common/,controller/,mapper/ -Destination $releaseDir/ -Recurse -Force
-          New-Item -ItemType Directory -Force -Path "$releaseDir/dist"
-          Copy-Item -Path dist/* -Destination "$releaseDir/dist/" -Recurse -Force
-          
-          'python main.py' | Out-File -FilePath "$releaseDir/taosync-cas.bat" -Encoding utf8
-          
-          Compress-Archive -Path $releaseDir/* -DestinationPath "taosync-cas-$env:VERSION-windows-amd64.zip" -Force
-      
-      - name: 上传Windows包
-        uses: actions/upload-artifact@v4
-        with:
-          name: windows-package
-          path: "taosync-cas-${{ env.VERSION }}-windows-amd64.zip"
-
-  build-macos-package:
-    name: 构建macOS包
-    runs-on: macos-latest
-    needs: [get-version, build-frontend]
-    env:
-      VERSION: ${{ needs.get-version.outputs.VERSION }}
-    
-    steps:
-      - name: 检出代码
-        uses: actions/checkout@v4
-      
-      - name: 下载前端
-        uses: actions/download-artifact@v4
-        with:
-          name: frontend-dist
-          path: dist
-      
-      - name: 创建macOS包
-        run: |
-          RELEASE_DIR="taosync-cas-$VERSION-macos-universal"
-          mkdir -p "$RELEASE_DIR"
-          
-          cp *.py *.txt *.spec *.md "$RELEASE_DIR/" 2>/dev/null || true
-          cp -r service common controller mapper "$RELEASE_DIR/"
-          mkdir -p "$RELEASE_DIR/dist"
-          cp -r dist/* "$RELEASE_DIR/dist/"
-          
-          echo '#!/bin/bash' > "$RELEASE_DIR/taosync-cas.sh"
-          echo 'cd "$(dirname "$0")"' >> "$RELEASE_DIR/taosync-cas.sh"
-          echo 'python3 main.py' >> "$RELEASE_DIR/taosync-cas.sh"
-          
-          chmod +x "$RELEASE_DIR/taosync-cas.sh"
-          
-          tar czf "taosync-cas-$VERSION-macos-universal.tar.gz" "$RELEASE_DIR/"
-      
-      - name: 上传macOS包
-        uses: actions/upload-artifact@v4
-        with:
-          name: macos-package
-          path: "taosync-cas-${{ env.VERSION }}-macos-universal.tar.gz"
-          retention-days: 1
-
-  create-release:
-    name: 创建发布
-    runs-on: ubuntu-latest
-    if: ${{ !contains(needs.get-version.outputs.VERSION, 'dev') }}
-    needs: [build-windows-package, build-macos-package, build-source-packages, build-docker, get-version]
-    env:
-      VERSION: ${{ needs.get-version.outputs.VERSION }}
-    
     steps:
       - uses: actions/checkout@v4
 
-      - name: 下载所有制品
+      - name: 下载前端
         uses: actions/download-artifact@v4
         with:
-          pattern: "*-package"
-          merge-multiple: true
+          name: frontend-dist
+          path: dist
+
+      - name: 对齐 PyInstaller 需要的 front/ 目录
+        run: |
+          mkdir -p front
+          cp -r dist/* front/
+
+      - name: 设置 Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: 安装依赖并打包
+        run: |
+          pip install -r requirements.txt "pyinstaller>=6,<7"
+          pyinstaller --onefile --name taoSync \
+            --add-data "front:front" \
+            --icon=logo.ico main.py
+
+      - name: 上传 Linux 单文件
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-binary
+          path: dist/taoSync
+
+  # ============================================================
+  # 5. 创建 Release
+  # ============================================================
+  create-release:
+    name: 创建 Release
+    runs-on: ubuntu-latest
+    if: ${{ !contains(needs.get-version.outputs.VERSION, 'dev') }}
+    needs: [get-version, build-docker, build-executables]
+    env:
+      VERSION: ${{ needs.get-version.outputs.VERSION }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 下载可执行文件
+        uses: actions/download-artifact@v4
+        with:
+          name: linux-binary
+
+      - name: 打包 Linux CLI
+        run: |
+          chmod +x taoSync
+          tar czf taosync-cas-${{ env.VERSION }}-linux-amd64.tar.gz taoSync
 
       - name: 生成 Release Notes
         run: |
-          cat > release_notes.md <<EOF
+          cat > notes.md <<EOF
           ## TaoSync-CAS $VERSION
 
-          ### 🐳 镜像
-          - Docker Hub: \`miuior/taosync-cas:$VERSION\`
-          - GHCR: \`ghcr.io/jzerom/taosync-cas:$VERSION\`
+          - 🐳 Docker Hub: \`miuior/taosync-cas:$VERSION\`
+          - 📦 GHCR: \`ghcr.io/jzerom/taosync-cas:$VERSION\`
+          - 🐧 Linux 单文件（无需 Python 环境）
 
-          ### 📦 预打包
-          - Windows (amd64)
-          - macOS (universal)
-          - Linux 源码包（含前端，自带启动脚本）
-
-          > 本版本为社区魔改分支，同步上游逻辑并保留 CAS 特性。
+          > 社区魔改分支，保留 CAS 联动特性。
           EOF
 
-      - name: 发布
-        uses: softprops/action-gh-release@v2
+      - uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ env.VERSION }}
-          body_path: release_notes.md
+          body_path: notes.md
           files: |
-            taosync-cas-${{ env.VERSION }}-windows-amd64.zip
-            taosync-cas-${{ env.VERSION }}-macos-universal.tar.gz
-            taosync-cas-${{ env.VERSION }}-source.tar.gz
+            taosync-cas-${{ env.VERSION }}-linux-amd64.tar.gz
