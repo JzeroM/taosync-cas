@@ -78,7 +78,7 @@ jobs:
           retention-days: 1
 
   # ============================================================
-  # 3. 构建多架构 Docker 镜像
+  # 3. 构建多架构 Docker 镜像（仅 amd64 / arm64）
   # ============================================================
   build-docker:
     name: 构建Docker与linux
@@ -91,8 +91,6 @@ jobs:
         platform:
           - linux/amd64
           - linux/arm64
-          - linux/arm/v7
-          - linux/arm/v6
 
     steps:
       - name: 替换平台名中的斜杠
@@ -168,7 +166,7 @@ jobs:
           docker buildx imagetools create ${{ env.TAG_LIST }}$(printf '${{ env.DOCKER_USER }}/${{ env.DOCKER_NAME }}@sha256:%s ' *)
 
   # ============================================================
-  # 4. Windows（已修正 PLATFORM 拼写）
+  # 4. Windows
   # ============================================================
   build-windows:
     name: 构建windows
@@ -253,64 +251,7 @@ jobs:
           path: dist/*.tar.gz
 
   # ============================================================
-  # 6. Linux StaticX（仅在 Linux 容器内跑，不碰 Windows）
-  # ============================================================
-  build-staticx:
-    name: 构建Linux StaticX
-    runs-on: ubuntu-latest
-    needs: [get-version, build-frontend]
-    env:
-      VERSION: ${{ needs.get-version.outputs.VERSION }}
-    strategy:
-      matrix:
-        platform: ["amd64", "arm64", "arm32"]
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
-        with:
-          name: web-dist
-          path: front
-
-      - uses: docker/setup-qemu-action@v3
-        with:
-          platforms: all
-
-      - name: 设置架构变量
-        run: |
-          case "${{ matrix.platform }}" in
-            amd64) echo "T_ARCH=amd64;LIB=/usr/lib/x86_64-linux-gnu" >> $GITHUB_ENV ;;
-            arm64) echo "T_ARCH=arm64;LIB=/usr/lib/aarch64-linux-gnu" >> $GITHUB_ENV ;;
-            arm32) echo "T_ARCH=arm/v7;LIB=/usr/lib/arm-linux-gnueabihf" >> $GITHUB_ENV ;;
-          esac
-
-      - name: Docker 内静态打包
-        env:
-          MATRIX: ${{ matrix.platform }}
-        run: |
-          IMG="python:3.11-slim-bullseye"
-          [[ "${{ matrix.platform }}" == arm* ]] && IMG="arm32v7/${IMG}" || true
-          [[ "${{ matrix.platform }}" == arm64 ]] && IMG="arm64v8/${IMG}" || true
-          docker run --rm --platform linux/${T_ARCH} -v $PWD:/app -w /app \
-            -e APP_NAME=${APP_NAME} -e LIB_PATH=${LIB} ${IMG} sh -c '
-              apt-get update && apt-get install -y build-essential zlib1g-dev patchelf binutils zip
-              pip install --upgrade pip && pip install "pyinstaller>=6,<7" staticx -r requirements.txt
-              pyinstaller ${APP_NAME}.spec --distpath dist/${MATRIX} --noconfirm
-              staticx dist/${MATRIX}/${APP_NAME} dist/${MATRIX}/${APP_NAME}_sx
-              mv dist/${MATRIX}/${APP_NAME}_sx dist/${MATRIX}/${APP_NAME}
-            '
-
-      - name: 压缩产物
-        run: |
-          cd dist/${{ matrix.platform }}
-          zip -r ../../${APP_NAME}-${VERSION}-linux-StaticX-${{ matrix.platform }}.zip .
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: dist-linux-staticx-${{ matrix.platform }}
-          path: ${{ env.APP_NAME }}-${{ env.VERSION }}-linux-StaticX-${{ matrix.platform }}.zip
-
-  # ============================================================
-  # 7. Android（修正：先下载前端再对齐）
+  # 6. Android
   # ============================================================
   build-android:
     name: 构建Android
@@ -362,12 +303,12 @@ jobs:
           path: dist/*.apk
 
   # ============================================================
-  # 8. 发布 Release
+  # 7. 发布 Release
   # ============================================================
   create-release:
     name: 发布release
     runs-on: ubuntu-latest
-    needs: [get-version, build-windows, build-darwin, build-docker, build-staticx, build-android]
+    needs: [get-version, build-windows, build-darwin, build-docker, build-android]
     env:
       VERSION: ${{needs.get-version.outputs.VERSION}}
     if: ${{ !contains(needs.get-version.outputs.VERSION, 'dev') }}
