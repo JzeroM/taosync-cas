@@ -2,8 +2,6 @@ TaoSync-CAS
 
 <div align="center">
 
-<a href=""><img width="200px" alt="logo" src="frontend/public/logo-200-64.png"/></a>
-
 TaoSync-CAS 是一个魔改自 TaoSync 的自动化同步工具
 
 </div>
