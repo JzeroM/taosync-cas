@@ -1,22 +1,31 @@
 # -*- mode: python ; coding: utf-8 -*-
 import os
-from PyInstaller.utils.hooks import collect_all
+import sys
 
-# CI / 本地 cwd 都是项目根，比 __file__ 稳
+# 动态获取项目根目录（兼容 CI）
 base_path = os.getcwd()
-
-charset_datas, charset_binaries, charset_hiddenimports = collect_all('charset_normalizer')
 
 a = Analysis(
     ['main.py'],
     pathex=[base_path],
-    binaries=charset_binaries,
-    # 把 CI 造好的 front/ 原样映射为包内 front/
+    binaries=[],
+    # 前端资源 + 语言包
     datas=[
         (os.path.join(base_path, 'front'), 'front'),
         (os.path.join(base_path, 'locales'), 'locales'),
-    ] + charset_datas,
-    hiddenimports=charset_hiddenimports,
+    ],
+    hiddenimports=[
+        'tornado',
+        'controller.systemController',
+        'controller.jobController',
+        'controller.notifyController',
+        'service.system',
+        'service.syncJob.jobClient',
+        'mapper.jobMapper',
+        'common.config',
+        'common.LNG',
+        'charset_normalizer',  # 显式声明，避免自动收集出错
+    ],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
