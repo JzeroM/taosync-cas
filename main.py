@@ -1,52 +1,50 @@
-# -*- mode: python ; coding: utf-8 -*-
+import asyncio
+import logging
 import os
-from PyInstaller.utils.hooks import collect_all
+import sys
 
-# 动态拿 spec 所在目录
-base_path = os.path.abspath(os.path.dirname(__file__))
+from tornado.web import Application, RequestHandler, StaticFileHandler
 
-# charset_normalizer 兼容
-charset_datas, charset_binaries, charset_hiddenimports = collect_all('charset_normalizer')
+from common.config import getConfig
+from common.LNG import G
+from controller import systemController, jobController, notifyController
+from service.system import onStart
 
-a = Analysis(
-    ['main.py'],
-    pathex=[base_path],
-    binaries=charset_binaries,
-    datas=[
-        # CI 里前端产物在 front/，打进 exe 内部也叫 front/
-        (os.path.join(base_path, 'front'), 'front'),
-        (os.path.join(base_path, 'locales'), 'locales'),
-    ] + charset_datas,
-    hiddenimports=charset_hiddenimports,
-    hookspath=[],
-    hooksconfig={},
-    runtime_hooks=[],
-    excludes=[],
-    noarchive=False,
-    optimize=0,
-)
 
-pyz = PYZ(a.pure)
+class MainIndex(RequestHandler):
+    def get(self):
+        self.render(os.path.join(frontendPath, "front/index.html"))
 
-exe = EXE(
-    pyz,
-    a.scripts,
-    a.binaries,
-    a.datas,
-    [],
-    name='taoSync',
-    debug=False,
-    bootloader_ignore_signals=False,
-    strip=False,
-    upx=True,
-    upx_exclude=[],
-    runtime_tmpdir=None,
-    console=True,
-    disable_windowed_traceback=False,
-    argv_emulation=False,
-    target_arch=None,
-    codesign_identity=None,
-    entitlements_file=None,
-    # 有就引，没有就不挂
-    icon=os.path.join(base_path, 'logo.ico') if os.path.exists(os.path.join(base_path, 'logo.ico')) else None,
-)
+
+def make_app():
+    # 以/svr/noAuth开头的请求无需鉴权，例如登录等
+    return Application([
+        (r"/svr/noAuth/login", systemController.Login),
+        (r"/svr/user", systemController.User),
+        (r"/svr/language", systemController.Language),
+        (r"/svr/alist", jobController.Alist),
+        (r"/svr/storage", jobController.Storage),
+        (r"/svr/job", jobController.Job),
+        (r"/svr/notify", notifyController.Notify),
+        (r"/", MainIndex),
+        (r"/(.*)", StaticFileHandler,
+         {"path": os.path.join(frontendPath, "front")})
+    ], cookie_secret=server['passwdStr'])
+
+
+async def main():
+    app = make_app()
+    logger = logging.getLogger()
+    app.listen(server['port'])
+    successMsg = G('running_success').format(url=f"http://127.0.0.1:{server['port']}/")
+    logger.critical(successMsg)
+    await asyncio.Event().wait()
+
+
+if __name__ == "__main__":
+    onStart.init()
+    cfg = getConfig()
+    frontendPath = sys._MEIPASS if getattr(sys, 'frozen', False) else '.'
+    # 后端配置
+    server = cfg['server']
+    asyncio.run(main())
