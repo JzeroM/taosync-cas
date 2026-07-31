@@ -432,7 +432,7 @@ class JobTask:
     def syncWithHave(self, srcPath, dstPath, spec, srcRootPath, dstRootPath, firstDst):
         """
         扫描并同步-目标目录存在目录
-        修改：源文件使用完整文件名，目标文件只移除最后的扩展名
+        修改：源文件提取最后一个点号前的部分，目标文件提取倒数第二个点号前的部分
         """
         if self.breakFlag:
             return
@@ -446,7 +446,7 @@ class JobTask:
             logger.error(f"获取目录列表失败: {e}")
             return
         
-        # 构建目标端文件名前缀集合（只移除最后的扩展名）
+        # 构建目标端文件名前缀集合（提取倒数第二个点号前的部分）
         dst_filename_prefixes = set()
         prefix_debug_info = []
         
@@ -455,11 +455,17 @@ class JobTask:
                 # 获取目标文件名（去掉路径）
                 filename = dst_key.split('/')[-1]
                 
-                # 只移除最后的扩展名
-                if '.' in filename:
-                    filename_prefix = filename.rsplit('.', 1)[0]  # 只移除最后一个点后的内容
+                # ★★★ 修改点1：目标文件提取倒数第二个点号前的部分 ★★★
+                parts = filename.split('.')
+                if len(parts) >= 3:
+                    # 例如 "abc.ef.mkv.cas" → ["abc", "ef", "mkv", "cas"] → "abc.ef"
+                    filename_prefix = '.'.join(parts[:-2])
+                elif len(parts) == 2:
+                    # 例如 "video1.cas" → ["video1", "cas"] → "video1"
+                    filename_prefix = parts[0]
                 else:
-                    filename_prefix = filename
+                    # 例如 "video1" → ["video1"] → "video1"
+                    filename_prefix = parts[0]
                 
                 dst_filename_prefixes.add(filename_prefix)
                 prefix_debug_info.append(f"目标文件: {dst_key} -> 提取前缀: '{filename_prefix}'")
@@ -480,22 +486,28 @@ class JobTask:
                 if not is_video_file:
                     continue
                 
-                # 获取源文件的完整文件名（带扩展名）
-                src_full_filename = key.split('/')[-1] if '/' in key else key
+                # 获取源文件名
+                src_filename = key.split('/')[-1] if '/' in key else key
+                
+                # ★★★ 修改点2：源文件提取最后一个点号前的部分 ★★★
+                if '.' in src_filename:
+                    src_prefix = src_filename.rsplit('.', 1)[0]
+                else:
+                    src_prefix = src_filename
                 
                 # 调试信息
-                logger.info(f"[CAS调试] 检查源文件: {src_full_filename}")
-                logger.info(f"[CAS调试] 比较: 源完整文件名='{src_full_filename}' vs 目标前缀集合={dst_filename_prefixes}")
-                logger.info(f"[CAS调试] 是否在集合中: {src_full_filename in dst_filename_prefixes}")
+                logger.info(f"[CAS调试] 检查源文件: {src_filename} -> 提取前缀: '{src_prefix}'")
+                logger.info(f"[CAS调试] 比较: 源前缀='{src_prefix}' vs 目标前缀集合={dst_filename_prefixes}")
+                logger.info(f"[CAS调试] 是否在集合中: {src_prefix in dst_filename_prefixes}")
                 
-                # CAS检查：源文件完整文件名 是否在 目标文件前缀集合中
-                if src_full_filename in dst_filename_prefixes:
+                # CAS检查：源文件前缀 是否在 目标文件前缀集合中
+                if src_prefix in dst_filename_prefixes:
                     # 找到匹配，跳过同步
-                    logger.info(f"✅ 跳过 {src_full_filename}，目标目录存在相同前缀文件")
+                    logger.info(f"✅ 跳过 {src_filename}，目标目录存在相同前缀文件")
                     continue
                 else:
                     # 没有匹配，执行同步
-                    logger.info(f"🔄 同步 {src_full_filename}")
+                    logger.info(f"🔄 同步 {src_filename}")
                     self.copyFile(srcPath, dstPath, key, srcFiles[key])
             
             # 如果是目录
@@ -513,7 +525,7 @@ class JobTask:
         if self.job['method'] == 1:
             for dstKey in dstFiles.keys():
                 if dstKey not in srcFiles:
-                    self.delFile(dstPath, dstKey, dstFiles[dstKey])    
+                    self.delFile(dstPath, dstKey, dstFiles[dstKey])   
                 
     def syncWithOutHave(self, srcPath, dstPath, spec, srcRootPath, dstRootPath, firstDst):
         """
