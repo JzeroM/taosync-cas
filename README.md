@@ -49,8 +49,6 @@ docker run -d \
 
 创建 docker-compose.yml文件：
 ```sh
-version: '3.8'
-
 services:
   taosync:
     image: miuior/taosync-cas:latest
