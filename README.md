@@ -32,7 +32,7 @@ TaoSync-CAS​ 是在[原版 TaoSync](https://github.com/dr34m-cn/taosync) 基�
 
 TaoSync-CAS → 同步视频文件 → OpenList-CAS → 生成.cas文件 → TaoSync-CAS (跳过已处理文件)
 
-🚀 快速开始（新增安卓客户端）
+🚀 快速开始（新增安卓apk）
 
 🐳 Docker 部署
 
