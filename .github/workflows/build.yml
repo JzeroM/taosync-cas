@@ -2,8 +2,8 @@ name: 构建
 
 on:
   push:
-    branches: [ 'main' ]
-    paths: [ 'version.txt' ]
+    branches: ['main']
+    paths: ['version.txt']
 
 env:
   APP_NAME: taoSync
@@ -20,11 +20,9 @@ jobs:
     outputs:
       TAG_LIST: ${{ steps.getVersion.outputs.TAG_LIST }}
       VERSION: ${{ steps.getVersion.outputs.VERSION }}
-
     steps:
       - name: 检出仓库代码
         uses: actions/checkout@v4
-
       - id: getVersion
         name: 解析 version.txt
         run: |
@@ -44,32 +42,27 @@ jobs:
   build-frontend:
     name: 构建前端
     runs-on: ubuntu-latest
-    needs: [ get-version ]
+    needs: [get-version]
     env:
       VERSION: ${{ needs.get-version.outputs.VERSION }}
-
     steps:
       - name: 检出代码
         uses: actions/checkout@v4
-
       - name: 安装 Node.js 22.x
         uses: actions/setup-node@v4
         with:
           node-version: "22.x"
           cache: npm
           cache-dependency-path: web/package-lock.json
-
       - name: 安装依赖并构建
         working-directory: web
         run: |
           npm ci
           npm run build
-
       - name: 对齐前端目录
         run: |
           mkdir -p front
           cp -r web/dist/* front/
-
       - name: 上传产物
         uses: actions/upload-artifact@v4
         with:
@@ -78,12 +71,12 @@ jobs:
           retention-days: 1
 
   # ============================================================
-  # 3. Docker（保持 digest 合并流）
+  # 3. Docker
   # ============================================================
   build-docker:
     name: 构建Docker
     runs-on: ubuntu-latest
-    needs: [ get-version, build-frontend ]
+    needs: [get-version, build-frontend]
     env:
       VERSION: ${{ needs.get-version.outputs.VERSION }}
     strategy:
@@ -91,32 +84,26 @@ jobs:
         platform:
           - linux/amd64
           - linux/arm64
-
     steps:
       - name: 替换平台名中的斜杠
         run: |
           platform=${{ matrix.platform }}
           echo "PLATFORM_PAIR=${platform//\//-}" >> $GITHUB_ENV
-
       - name: 设置 QEMU & BuildX
         uses: docker/setup-qemu-action@v3
       - uses: docker/setup-buildx-action@v3
-
       - name: 登录 DockerHub
         uses: docker/login-action@v3
         with:
           username: ${{ env.DOCKER_USER }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
-
       - name: 检出代码
         uses: actions/checkout@v4
-
       - name: 下载前端
         uses: actions/download-artifact@v4
         with:
           name: web-dist
           path: front
-
       - id: build-image
         name: 构建镜像
         uses: docker/build-push-action@v6
@@ -126,13 +113,11 @@ jobs:
           outputs: |
             type=docker
             type=image,name=${{ env.DOCKER_USER }}/${{ env.DOCKER_NAME }},push-by-digest=true,name-canonical=true,push=true
-
       - name: 导出 digest
         run: |
           mkdir -p /tmp/digests
           digest="${{ steps.build-image.outputs.digest }}"
           touch "/tmp/digests/${digest#sha256:}"
-
       - name: 上传 digest
         uses: actions/upload-artifact@v4
         with:
@@ -153,40 +138,180 @@ jobs:
           path: /tmp/digests
           pattern: digests-*
           merge-multiple: true
-
       - uses: docker/setup-buildx-action@v3
       - uses: docker/login-action@v3
         with:
           username: ${{ env.DOCKER_USER }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
-
       - name: 推送多架构清单
         working-directory: /tmp/digests
         run: |
           docker buildx imagetools create ${{ env.TAG_LIST }}$(printf '${{ env.DOCKER_USER }}/${{ env.DOCKER_NAME }}@sha256:%s ' *)
 
   # ============================================================
-  # 4. 发布 Release（仅 Docker Tag）
+  # 4. 构建 Android APK（从原版 dr34m/taosync 移植）
+  # ============================================================
+  build-android:
+    name: 构建Android
+    runs-on: ubuntu-latest
+    needs: [get-version, build-frontend]
+    env:
+      VERSION: ${{ needs.get-version.outputs.VERSION }}
+      BUILDOZER_SPEC: buildozer.spec
+      P4A_VERSION: 2024.01.21
+      CACHE_VERSION: v6
+    steps:
+      - name: 检出仓库代码
+        uses: actions/checkout@v4
+
+      - name: 下载前端
+        uses: actions/download-artifact@v4
+        with:
+          name: web-dist
+          path: web/dist
+
+      - name: 准备Android前端资源
+        run: |
+          rm -rf front
+          cp -r web/dist front
+          test -f front/index.html
+          test -f locales/zh_CN.yaml
+
+      - name: 设置python环境
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: 安装系统依赖
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y --no-install-recommends \
+            autoconf automake libtool pkg-config \
+            zlib1g-dev libncurses5-dev libncursesw5-dev \
+            libffi-dev libssl-dev libsqlite3-dev libbz2-dev libreadline-dev \
+            libportaudio2 libportaudiocpp0 \
+            libltdl-dev libtool-bin \
+            ccache git wget unzip zip \
+            openjdk-17-jdk build-essential
+          sudo ln -sf "$(which python3)" /usr/bin/python
+          echo "ACLOCAL_PATH=/usr/share/aclocal" >> "$GITHUB_ENV"
+
+      - name: 配置Java环境变量
+        run: |
+          echo "JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64" >> "$GITHUB_ENV"
+          echo "/usr/lib/jvm/java-17-openjdk-amd64/bin" >> "$GITHUB_PATH"
+
+      - name: 安装Buildozer与python-for-android
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install "buildozer==1.5.0" "python-for-android==${P4A_VERSION}" "Cython==0.29.34" virtualenv
+          python -c "import pythonforandroid; print('p4a version:', pythonforandroid.__version__)"
+
+      - name: 缓存Buildozer目录
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.buildozer
+            ~/.gradle
+          key: buildozer-${{ runner.os }}-${{ env.CACHE_VERSION }}-p4a${{ env.P4A_VERSION }}-py311-${{ hashFiles('buildozer.spec', 'requirements.txt') }}
+          restore-keys: |
+            buildozer-${{ runner.os }}-${{ env.CACHE_VERSION }}-p4a${{ env.P4A_VERSION }}-py311-
+
+      - name: 清理旧打包产物
+        run: |
+          rm -rf bin .python-for-android
+
+      - name: 切换Android入口
+        run: |
+          test -f "$BUILDOZER_SPEC"
+          test -f main_android.py
+          cp main_android.py main.py
+
+      - name: 注入Android版本号
+        run: |
+          ver_num="${VERSION#v}"
+          sed -i "s/^version = .*/version = $ver_num/" "$BUILDOZER_SPEC"
+          IFS='.' read -r major minor patch <<< "$ver_num"
+          major="${major%%[!0-9]*}"; major="${major:-0}"
+          minor="${minor%%[!0-9]*}"; minor="${minor:-0}"
+          patch="${patch%%[!0-9]*}"; patch="${patch:-0}"
+          numeric_version=$(( major*10000 + minor*100 + patch ))
+          sed -i "/^android.numeric_version[[:space:]]*=/d" "$BUILDOZER_SPEC"
+          sed -i "/^version[[:space:]]*=/a android.numeric_version = $numeric_version" "$BUILDOZER_SPEC"
+          grep -E "^(version|android.numeric_version)" "$BUILDOZER_SPEC"
+
+      - name: 编译Android Debug APK
+        run: PYTHONWARNINGS="ignore:Unable to find acceptable character detection:UserWarning" buildozer -v android debug
+
+      - name: 整理Android产物
+        run: |
+          mkdir -p dist
+          apk_path=$(find bin -maxdepth 1 -name '*.apk' -print -quit)
+          if [ -z "$apk_path" ]; then
+            echo "::error::未找到编译产物 APK"
+            exit 1
+          fi
+          cp "$apk_path" "dist/${APP_NAME}-${VERSION}-android-debug.apk"
+
+      - name: 上传artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist-android
+          path: dist/*.apk
+          if-no-files-found: error
+          retention-days: 1
+          compression-level: 0
+
+  # ============================================================
+  # 5. 发布 Release（挂上 APK）
   # ============================================================
   create-release:
     name: 发布release
     runs-on: ubuntu-latest
-    needs: [get-version, build-docker, merge-docker]
+    needs: [get-version, build-docker, merge-docker, build-android]
     env:
-      VERSION: ${{needs.get-version.outputs.VERSION}}
+      VERSION: ${{ needs.get-version.outputs.VERSION }}
     if: ${{ !contains(needs.get-version.outputs.VERSION, 'dev') }}
     steps:
-      - uses: actions/checkout@v4
-      - name: 生成 changelog
+      - name: 检出仓库代码
+        uses: actions/checkout@v4
+
+      - name: 下载全部平台构建结果
+        uses: actions/download-artifact@v4
+        with:
+          pattern: dist-*
+          path: dist
+          merge-multiple: true
+
+      - name: 下载Android APK
+        uses: actions/download-artifact@v4
+        with:
+          name: dist-android
+          path: dist
+
+      - name: 检查Android发布产物
         run: |
-          version_base="${VERSION%%-*}"
-          LOG="doc/changelog/$version_base.md"
-          if [ ! -f "$LOG" ]; then
-            echo "$VERSION 自动构建发布" > "$LOG"
+          apk_path=$(find dist -maxdepth 1 -type f -name "${APP_NAME}-${VERSION}-android-*.apk" -print -quit)
+          if [ -z "$apk_path" ]; then
+            echo "::error::Release 中缺少 Android APK"
+            exit 1
           fi
-          echo "LOG=$LOG" >> $GITHUB_ENV
-      - uses: softprops/action-gh-release@v2
+          echo "Android APK: $apk_path"
+
+      - name: 没有版本日志文件自动创建
+        run: |
+          version_first=$(echo $VERSION | cut -d'-' -f1)
+          LOG_FILE="doc/changelog/$version_first.md"
+          if [ ! -f "$LOG_FILE" ]; then
+            touch "$LOG_FILE"
+            echo "$VERSION" > "$LOG_FILE"
+          fi
+          echo "LOG_FILE=$LOG_FILE" >> "$GITHUB_ENV"
+
+      - name: 创建release
+        uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ env.VERSION }}
-          body_path: ${{ env.LOG }}
+          files: dist/*
+          body_path: ${{ env.LOG_FILE }}
           prerelease: false
